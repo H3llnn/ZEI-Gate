@@ -180,6 +180,7 @@ class Store:
             raise PermissionError('Hanya pemilik bot yang boleh mengubah pengaturan.')
 
     def deploy(self, actor, bot, username, api_id, api_hash, token, session, name=None, kind='forcesubs'):
+        if kind not in ('forcesubs','payment'): raise ValueError('Akun Userbot memakai proses pembuatan akun tersendiri.')
         if not self.allowed(actor, kind):
             raise PermissionError('Kamu belum mendapat izin membuat bot.')
         existing = self.rows('SELECT owner,kind FROM bots WHERE id=?', (bot,))

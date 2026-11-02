@@ -198,6 +198,17 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
         await runner.stop()
         self.assertEqual(child.returncode,0)
 
+    async def test_new_creation_after_success_clears_secrets_and_keeps_service(self):
+        await self.login();await self.action('create')
+        result=await self.action('new')
+        self.assertEqual(result['step'],'choose')
+        self.assertTrue(result['existing'])
+        self.assertIn(2,self.manager.userbots.running)
+        session=self.creation.sessions[self.token]
+        self.assertEqual((session.api_hash,session.bot_token,session.identity),('', '', {}))
+        with self.assertRaises(ValueError):
+            self.db.deploy(2,99,'ChildBot',123,'a'*32,'token','session',kind='userbot')
+
     async def test_bad_identity_does_not_spawn(self):
         with self.assertRaises(PermissionError): await self.manager.userbots.deploy(2,{}, {"id":3,"name":"Other"})
         self.assertFalse(self.created)

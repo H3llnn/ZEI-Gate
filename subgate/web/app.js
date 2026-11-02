@@ -38,6 +38,7 @@ function render(next){state=next;const step=state.step;el("fields").replaceChild
  if(step==="done"||step==="cancelled"){
    el("submit").hidden=true;el("cancel").hidden=true;
    if(step==="done"){el("fields").append(node("p","✦","success"));el("fields").append(node("p",state.kind==="userbot"?"Ketik "+(state.result?.prefix||".")+"help dari akunmu untuk mulai.":"Buka botmu dan gunakan /setting untuk mulai mengatur.","hint"));}
+   if(step==="done"){const again=node("button","✨ Buat Layanan Lagi","quiet");again.type="button";again.onclick=()=>action({action:"new"});el("fields").append(again);}
    const target=step==="done"&&state.kind!=="userbot"?state.result?.username:state.helper;
    if(target){const a=link(step==="done"&&state.kind!=="userbot"?"Buka Bot ↗":"Kembali ke Bot Induk ↗","https://t.me/"+target);a.id="return";el("fields").append(a);}
  }

@@ -139,6 +139,11 @@ class Creation:
             session.touched = time.monotonic()
             action = data.get("action")
             if action == "status": return web.json_response(self.view(session))
+            if action == "new" and session.step == "done":
+                session.step, session.kind = "choose", ""
+                session.api_id, session.api_hash, session.bot_token = 0, "", ""
+                session.identity, session.result = {}, {}
+                return web.json_response(self.view(session))
             if action == "cancel" and session.step == "done": return web.json_response(self.view(session))
             if action == "cancel":
                 await self.discard(session)
