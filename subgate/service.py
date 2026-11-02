@@ -51,7 +51,10 @@ class Delivery:
         return member
 
     async def missing(self, user):
-        if self.db.can_upload(self.bot, user):
+        settings=self.db.settings(self.bot)
+        if settings.get('legacy_forcesubs'):
+            if user==self.db.bot(self.bot)['owner'] or user in settings.get('legacy_force_admins',[]):return []
+        elif self.db.can_upload(self.bot,user):
             return []
         missing = []
         for target in self.db.targets(self.bot):

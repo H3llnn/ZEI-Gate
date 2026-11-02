@@ -149,6 +149,8 @@ class Manager:
                                 api=API(self.db.credentials(record['id'])['token']); temporary=True
                         if api is None: continue
                     if record['kind']=='payment':
+                        if self.db.settings(record['id']).get('legacy_forcesubs'):
+                            await Delivery(self.db,record['id'],api).expire()
                         if runner:
                             await runner.handler.__self__.service.tick()
                         else:

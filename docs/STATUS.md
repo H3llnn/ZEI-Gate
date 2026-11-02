@@ -1,9 +1,17 @@
-# Status implementasi · 2 November 2026
+# ZΞI Project — versi 0.1.1
 
-- Fondasi Gate + Mini App + runtime Userbot dibuat di source terpisah, bukan dipasang ke bot yang sedang berjalan.
-- 127 tes Gate termasuk 110 regresi sebelumnya dan 17 tes baru login/izin/HTTP; 5 tes runtime Userbot lulus pada pemeriksaan lokal.
-- Alur UI seluler choose → API → nomor → OTP → 2FA → ringkasan → sukses diperiksa dengan server simulasi lokal. Data login simulasi bukan akun nyata. JavaScript lolos pemeriksaan sintaks Node.
-- 38 perintah tersedia; tidak seluruh modul Man-Userbot. Lihat MODULES.md repo Userbot untuk batas porting.
-- Belum diuji: login Telegram nyata, QRIS nyata ulang setelah perubahan ini, hak admin grup nyata, inline mode pada bot milik pengguna, deployment Docker/VPS dan HTTPS domain nyata.
-- Source disiapkan untuk repo H3llnn/ZEI-Gate dan H3llnn/ZEI-Userbot. Publikasi source tidak berarti bot produksi sudah diperbarui. Workflow Gate menguji pemasangan runtime dari repo Userbot.
-- Migrasi bersifat penambahan tabel/perizinan, tidak menghapus konten/pesanan. Rollback: hentikan proses, pulihkan backup config/data sebelum pembaruan; jangan mengganti SECRET_KEY.
+## Pemeriksaan perangkat lunak
+
+- 134 tes Gate dan 5 tes Userbot lulus pada instalasi Python 3.13 di Windows.
+- Pemasangan dependensi dan pip check berhasil pada lingkungan baru.
+- Migrasi diuji dengan kunci enkripsi berbeda, pengaturan/link/pesanan tersimpan, percobaan ulang tanpa duplikasi, serta kegagalan penulisan hasil.
+- Peninjauan kode menemukan dan memperbaiki pemisahan peran admin saat bot berganti layanan dan publikasi migrasi yang harus atomik. Tes kedua masalah gagal sebelum perbaikan dan lulus sesudahnya.
+- Bot Payment hasil migrasi tetap melayani link ForceSubs lama beserta syarat join dan penghapusan otomatis. Bot Payment biasa tidak mengaktifkan kompatibilitas tersebut.
+- README utama memakai branding ZΞI. Lisensi dan referensi tetap tersedia pada berkas atribusi.
+
+## Batas pemeriksaan
+
+Aktivasi akun, OTP/2FA, mode inline Telegram dan uji transaksi nyata ditunda atas permintaan pemilik.
+Tidak ada poller bot induk/anak yang dijalankan untuk pengujian ini. HTTPS tetap diperlukan saat formulir akan diaktifkan.
+38 perintah Userbot tersedia; daftar fitur tambahan di inventaris referensi belum seluruhnya diimplementasikan.
+Paket distribusi publik tidak berisi konfigurasi pribadi, database pengguna, sesi akun, atau cadangan lokal.
