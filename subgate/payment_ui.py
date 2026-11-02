@@ -22,6 +22,8 @@ class PaymentUI(BaseUI):
         self.service=PaymentService(db,bot,api,self.provider)
         self.public_base=public_base
         self.checkouts={}
+        from .service import Delivery
+        self.legacy_delivery=Delivery(db,bot,api) if db.settings(bot).get('legacy_forcesubs') else None
         self.broadcast=Broadcast(db,bot,api,self.is_staff,show=self.text,track_preview=self.track_broadcast_preview)
 
     async def track_broadcast_preview(self,user,message):
@@ -123,6 +125,8 @@ class PaymentUI(BaseUI):
         await self.text(user,panel('🧾 Koleksi aksesmu','Semua pembelian yang berhasil ada di sini.') if rows else panel('🧾 Belum ada koleksi','Akses yang sudah kamu beli akan muncul di sini 🤍'),buttons)
 
     async def callback(self,user,data,message):
+        if self.legacy_delivery and data.startswith('get:'):
+            return await self.legacy_delivery.deliver(user,data[4:])
         parts=data.split(':')
         if data=='p:home': return await self.home(user)
         if data.startswith('p:list:'): return await self.listing(user,int(parts[2]))
@@ -321,6 +325,10 @@ class PaymentUI(BaseUI):
             return await self.text(user,'Kirim foto sambutan (atau hapus) sekarang.' if data.endswith('_photo') else 'Kirim teks sambutan, maksimal 1000 karakter.',[[button('✖️ Batal','x:cancel')]])
 
     async def message(self,user,message):
+        legacy_cmd,legacy_key=command(message)
+        if self.legacy_delivery and legacy_cmd=='/start' and legacy_key and self.db.sources(self.bot,legacy_key):
+            self.clear(user)
+            return await self.legacy_delivery.deliver(user,legacy_key)
         cmd,_=command(message)
         if cmd=='/start':
             self.store.mark_started(self.bot,user)

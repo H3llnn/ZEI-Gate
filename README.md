@@ -24,14 +24,14 @@ Letakkan dua folder berdampingan:
 ZEI-Project/
   ZEI-Gate/
   ZEI-Userbot/
-`
+
 
 Di terminal folder ZEI-Gate:
 
-````powershell
+```powershell
 python install.py
 ```
-`
+
 
 Untuk instalasi baru, salin sample_config.env menjadi config.env dan isi token bot induk, ID pemilik, SECRET_KEY. Buat kunci dengan .venv\Scripts\python.exe -m subgate.keygen.
 
@@ -39,12 +39,12 @@ Untuk pembaruan, cadangkan config.env dan seluruh folder data ketika bot berhent
 
 ## Aktifkan formulir pembuatan
 
-````ini
+```ini
 CREATION_ENABLE=1
 CREATION_PUBLIC_BASE=https://domain-milikmu.example
 CREATION_BIND=127.0.0.1
 CREATION_PORT=8081
-`
+
 
 Domain HTTPS diarahkan melalui reverse proxy ke port 8081. Ini untuk Mini App, bukan kebutuhan webhook Payment. Pembayaran sederhana tetap tidak membutuhkan tunnel. Untuk uji laptop sementara dapat memakai tunnel ke port **8081**; jika alamat berubah, perbarui konfigurasi dan restart. Jangan menggunakan alamat tunnel lama yang sudah berhenti.
 
@@ -58,13 +58,25 @@ Proses Userbot terpisah per akun, tanpa shell/eval dan tanpa modul pihak ketiga 
 
 ## Pengujian
 
-````powershell
+```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
-`
+
 
 Tes lokal memakai Telegram dan pembayaran tiruan, tidak membuat pembayaran nyata atau login akun pengguna. Hasil dan batas pemeriksaan terdapat pada [status rilis](docs/STATUS.md).
 
 ## Lisensi
 
-GPL-3.0. Nama produk baru tidak menghapus hak cipta kode terdahulu. Lihat LICENSE dan THIRD_PARTY_NOTICES.md. Referensi kebutuhan Man-Userbot dicatat pada repo ZEI-Userbot; kesetaraan semua modul belum dinyatakan selesai.
+GPL-3.0. Nama produk baru tidak menghapus hak cipta kode terdahulu. Lihat LICENSE dan THIRD_PARTY_NOTICES.md. Sumber dan atribusi pustaka tercatat pada THIRD_PARTY_NOTICES.md masing-masing proyek.
+
+## Menyatukan instalasi lama
+
+Jika ForceSubs dan Payment masih berjalan dari folder berbeda tetapi memakai bot induk yang sama,
+hentikan keduanya dan siapkan cadangan konsisten dari config.env dan subgate.sqlite masing-masing.
+Gunakan python -m subgate.merge_install --forcesubs CADANGAN_FORCE --payment CADANGAN_PAYMENT --output FOLDER_BARU.
+Tool menolak bot induk/pemilik berbeda, mempertahankan sumber, menyatukan izin, dan mengenkripsi ulang data Payment
+menggunakan kunci ForceSubs. Tujuan harus baru; jangan arahkan ke instalasi aktif.
+
+Jika bot yang sama pernah beralih dari ForceSubs ke Payment dengan pemilik yang sama, menu Payment dipertahankan;
+link konten lama tetap dilayani melalui kompatibilitas khusus dan jadwal penghapusannya tetap berjalan.
+Paket akses serta riwayat transaksi tetap disimpan. Cadangan sumber merupakan jalur rollback.
