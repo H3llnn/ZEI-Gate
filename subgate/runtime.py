@@ -19,6 +19,8 @@ class Manager:
         self.lock = asyncio.Lock()
         self.maintenance_task = None
         self.payment_base = ""
+        self.userbots = None
+        self.creation = None
 
     def make_runner(self, record, credentials):
         from .telegram import API, Poller
@@ -84,6 +86,7 @@ class Manager:
     async def grant(self, actor, owner, kind):
         async with self.lock:
             self.db.grant(actor,owner,kind)
+            if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots(owner):
                 if not self.db.allowed(owner,record['kind']):
                     runner=self.running.pop(record['id'],None)
@@ -92,6 +95,7 @@ class Manager:
     async def revoke(self, actor, owner, kind='both'):
         async with self.lock:
             self.db.revoke(actor, owner, kind)
+            if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots(owner):
                 if not self.db.allowed(owner,record['kind']):
                     runner = self.running.pop(record['id'], None)
@@ -113,6 +117,7 @@ class Manager:
 
     async def restore(self):
         async with self.lock:
+            if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots():
                 if record['active'] and self.db.allowed(record['owner'],record['kind']):
                     try:
@@ -172,6 +177,7 @@ class Manager:
             await asyncio.sleep(10)
 
     async def close(self):
+        if self.userbots: await self.userbots.close()
         if self.maintenance_task:
             self.maintenance_task.cancel()
             await asyncio.gather(self.maintenance_task, return_exceptions=True)

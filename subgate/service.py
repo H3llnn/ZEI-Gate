@@ -188,7 +188,7 @@ class Delivery:
         if database:
             if member['status'] != 'creator' and not member.get('can_post_messages'):
                 raise ValueError('Bot memerlukan izin mengirim pesan di channel database.')
-            probe = await self.text(chat, 'Zeisss SubGate: pemeriksaan akses database.')
+            probe = await self.text(chat, 'ZΞI Gate: pemeriksaan akses database.')
             await self.api.call('deleteMessage', chat_id=chat, message_id=probe['message_id'])
             return info
         if member['status'] != 'creator' and not member.get('can_invite_users'):
@@ -197,6 +197,6 @@ class Delivery:
         if info.get('username'):
             url = f"https://t.me/{info['username']}"
         if not url:
-            invite = await self.api.call('createChatInviteLink', chat_id=chat, name='Zeisss SubGate')
+            invite = await self.api.call('createChatInviteLink', chat_id=chat, name='ZΞI Gate')
             url = invite['invite_link']
         return {'chat': chat, 'kind': 'channel' if info['type'] == 'channel' else 'group', 'url': url, 'title': info.get('title', str(chat))}

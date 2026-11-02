@@ -83,6 +83,8 @@ class Store:
 
             self.conn.execute('PRAGMA user_version=1')
         self.init_payment()
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS userbots (owner INTEGER PRIMARY KEY, name TEXT NOT NULL, credentials BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1, redeploy_required INTEGER NOT NULL DEFAULT 0)''')
+        self.conn.commit()
 
     def init_payment(self):
         from .payment_store import migrate
@@ -111,12 +113,12 @@ class Store:
             raise PermissionError('Hanya pemilik bot induk yang boleh melakukan ini.')
 
     def allowed(self, user, kind=None):
-        if kind is not None and kind not in ('forcesubs','payment'):
+        if kind is not None and kind not in ('forcesubs','payment','userbot'):
             raise ValueError('Jenis bot tidak dikenal.')
         if user == self.master_owner:
             return True
         if kind is not None:
-            if kind not in ('forcesubs', 'payment'):
+            if kind not in ('forcesubs', 'payment', 'userbot'):
                 raise ValueError('Jenis bot tidak dikenal.')
             rows = self.rows('SELECT allowed FROM creator_permissions WHERE user=? AND kind=?', (user, kind))
         else:
@@ -125,17 +127,23 @@ class Store:
 
     def grant(self, actor, user, kind='forcesubs'):
         self.master(actor)
-        if user <= 0 or kind not in ('forcesubs', 'payment', 'both'):
+        selected = set(kind.split('+')) if isinstance(kind, str) else set()
+        if kind == 'both': selected = {'forcesubs', 'payment'}
+        if kind == 'all': selected = {'forcesubs', 'payment', 'userbot'}
+        if user <= 0 or not selected or not selected <= {'forcesubs', 'payment', 'userbot'}:
             raise ValueError('ID atau jenis izin tidak valid.')
         with self.conn:
             self.conn.execute('INSERT INTO creators VALUES (?,1) ON CONFLICT(id) DO UPDATE SET allowed=1', (user,))
-            for name in ('forcesubs', 'payment'):
-                enabled = kind in (name, 'both')
+            for name in ('forcesubs', 'payment', 'userbot'):
+                enabled = name in selected
                 self.conn.execute('INSERT INTO creator_permissions VALUES (?,?,?) ON CONFLICT(user,kind) DO UPDATE SET allowed=excluded.allowed', (user,name,enabled))
                 if not enabled:
                     self._stop_kind(user, name)
 
     def _stop_kind(self, user, kind):
+        if kind == 'userbot':
+            self.conn.execute('UPDATE userbots SET active=0,redeploy_required=1 WHERE owner=?', (user,))
+            return
         self.conn.execute('UPDATE bots SET active=0,redeploy_required=1 WHERE owner=? AND kind=?', (user,kind))
         self.conn.execute("UPDATE payment_orders SET state='cancelled' WHERE bot IN (SELECT id FROM bots WHERE owner=? AND kind=?) AND state='pending' AND payment='pending'", (user,kind))
 
@@ -143,14 +151,14 @@ class Store:
         self.master(actor)
         if user == self.master_owner:
             raise ValueError('Tidak dapat mencabut izin pemilik bot induk.')
-        if kind not in ('forcesubs','payment','both'):
+        if kind not in ('forcesubs','payment','userbot','both','all'):
             raise ValueError('Jenis izin tidak dikenal.')
         with self.conn:
-            for name in ('forcesubs','payment'):
-                if kind in (name,'both'):
+            for name in ('forcesubs','payment','userbot'):
+                if kind == name or kind == 'all' or (kind == 'both' and name in ('forcesubs','payment')):
                     self.conn.execute('INSERT INTO creator_permissions VALUES (?,?,0) ON CONFLICT(user,kind) DO UPDATE SET allowed=0', (user,name))
                     self._stop_kind(user,name)
-            enabled = any(self.allowed(user,k) for k in ('forcesubs','payment'))
+            enabled = any(self.allowed(user,k) for k in ('forcesubs','payment','userbot'))
             self.conn.execute('INSERT INTO creators VALUES (?,?) ON CONFLICT(id) DO UPDATE SET allowed=excluded.allowed', (user,enabled))
 
     def creators(self):

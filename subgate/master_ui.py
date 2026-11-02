@@ -13,13 +13,27 @@ class MasterUI(BaseUI):
         super().__init__(db, api)
         self.manager = manager
 
+    async def handle(self, update):
+        if update.get('inline_query') or (update.get('callback_query', {}).get('data', '').startswith('uh:')):
+            from .userbot_help import handle
+            return await handle(self, update)
+        return await super().handle(update)
+
+    async def prefix_prompt(self, user):
+        service = getattr(self.manager, 'userbots', None)
+        if not service or not service.record(user) or not self.db.allowed(user,'userbot'):
+            raise PermissionError('Menu ini hanya tersedia untuk pemilik Userbot yang masih memiliki izin.')
+        self.wait(user,'userbot_prefix',back='u:mine')
+        await self.text(user,panel('✦ Prefix milikmu', 'Kirim 1–3 simbol tanpa spasi.\nContoh: <code>.</code>, <code>!</code>, atau <code>#</code>.'),[[button('Batalkan','x:cancel')]])
+
     async def menu(self, user):
         self.clear(user)
         buttons = [[button('＋ Buat / Deploy Bot', 'm:create')], [button('▦ Bot Saya', 'm:mine:0')]]
+        if getattr(self.manager, 'userbots', None): buttons += [[button('✦ Userbot Saya', 'u:mine')]]
         if user == self.db.master_owner:
             buttons += [[button('🔑 Tambah Izin', 'm:grant'), button('🔒 Cabut Izin', 'm:revoke')],
                         [button('👥 Daftar Pengguna', 'm:users:0')], [button('🤖 Semua Bot', 'm:bots:0')]]
-        await self.text(user, panel('Zeisss SubGate', '<i>Ruang kendali bot pribadimu.</i>\n\n'
+        await self.text(user, panel('ZΞI Gate', '<i>Ruang kendali bot pribadimu.</i>\n\n'
             f'Hai, {h(self.names.get(user, "teman"))} 👋\n'
             'Semua botmu, satu tempat. Buat bot baru atau kelola yang sudah aktif lewat menu di bawah.\n\n'
             '🔐 Akses khusus pengguna yang mendapat izin.\n\n<i>Maintained by Zeisss</i>'), buttons)
@@ -29,7 +43,14 @@ class MasterUI(BaseUI):
             self.clear(user)
             return await self.text(user, panel('Akses khusus 🔐',
                 'Kamu belum mendapat izin untuk membuat bot.\nHubungi pengelola untuk meminta akses, ya.'), [HOME])
+        creation = getattr(self.manager, 'creation', None)
+        if creation and creation.public_base:
+            self.clear(user)
+            return await self.text(user,panel('✨ Siapkan botmu.', 'Pilih layanan, hubungkan akun, dan mulai dari sini.\nPengelolaan tetap tersedia di bot induk.'),
+                [[{'text': '✨ Buka Ruang Pembuatan', 'web_app': {'url': creation.public_base}}],HOME])
         kinds=[k for k in ('forcesubs','payment') if self.db.allowed(user,k)]
+        if not kinds:
+            return await self.text(user,panel('Ruang pembuatan belum tersedia', 'Pengelola perlu mengaktifkan alamat HTTPS formulir pembuatan terlebih dahulu.'),[HOME])
         if kind is None and len(kinds)>1:
             self.clear(user)
             return await self.text(user,panel('Pilih jenis bot ✨','Bot mana yang ingin kamu jalankan?'),
@@ -149,23 +170,24 @@ class MasterUI(BaseUI):
                           f'm:revoke_ask:{target}' if allowed else f'm:grant_id:{target}')],
                    [button('Ubah Jenis Izin',f'm:grant_id:{target}')],
                    [button('🤖 Bot Pengguna', f'm:owned:{target}:0')],
+                   [button('✦ Userbot Pengguna', f'u:owner:{target}')],
                    [button('‹ Daftar Pengguna', 'm:users:0')], HOME]
         await self.text(user, panel('Detail akses pengguna 👤',
             f'<b>ID:</b> {target}\n<b>Akses:</b> {"🟢 Diizinkan" if allowed else "🔒 Dicabut"}\n'
-            f'<b>Jenis izin:</b> {h(", ".join(k for k in ("forcesubs","payment") if self.db.allowed(target,k)) or "Tidak ada")}\n<b>Jumlah bot:</b> {len(self.db.bots(target))}'), buttons)
+            f'<b>Jenis izin:</b> {h(", ".join(k for k in ("forcesubs","payment","userbot") if self.db.allowed(target,k)) or "Tidak ada")}\n<b>Jumlah bot:</b> {len(self.db.bots(target))}'), buttons)
 
     async def ask_revoke(self, user, target, kind=None):
         self.db.master(user)
         if target == self.db.master_owner:
             raise ValueError('Akses pemilik bot induk tidak dapat dicabut.')
-        kinds=[k for k in ('forcesubs','payment') if self.db.allowed(target,k)]
+        kinds=[k for k in ('forcesubs','payment','userbot') if self.db.allowed(target,k)]
         if kind is None and len(kinds)==1: kind=kinds[0]
         if kind is None:
             self.clear(user)
             return await self.text(user,panel('Cabut izin mana? 🔐',f'Pengguna: {target}'),
                 [[button('ForceSubs',f'm:revoke_type:{target}:forcesubs'),button('Payment',f'm:revoke_type:{target}:payment')],
-                 [button('Keduanya',f'm:revoke_type:{target}:both')],HOME])
-        if kind not in ('forcesubs','payment','both'): raise ValueError('Jenis tidak dikenal.')
+                 [button('Userbot',f'm:revoke_type:{target}:userbot'),button('Semua',f'm:revoke_type:{target}:all')],HOME])
+        if kind not in ('forcesubs','payment','userbot','both','all'): raise ValueError('Jenis tidak dikenal.')
         self.wait(user,'revoke_confirm',target=target,bot_kind=kind,back=f'm:user:{target}')
         await self.text(user,panel('Cabut akses pengguna? 🔐',
             f'Pengguna: <b>{target}</b>\nJenis: <b>{h(kind)}</b>\nBot terkait akan dihentikan dan pesanan belum dibayar dibatalkan. Data tetap disimpan. Setelah izin pulih, pemilik perlu deploy ulang.'),
@@ -176,9 +198,28 @@ class MasterUI(BaseUI):
         self.wait(user,'grant_kind',target=target)
         await self.text(user,panel('Pilih izin pengguna 🔑',f'ID: {target}\nJenis izin ini menggantikan izin sebelumnya. Bot dari jenis yang dicabut akan berhenti.'),
             [[button('ForceSubs',f'm:grant_kind:{target}:forcesubs'),button('Payment',f'm:grant_kind:{target}:payment')],
-             [button('Keduanya',f'm:grant_kind:{target}:both')],HOME])
+             [button('Userbot',f'm:grant_kind:{target}:userbot')],
+             [button('ForceSubs + Payment',f'm:grant_kind:{target}:both')],
+             [button('ForceSubs + Userbot',f'm:grant_kind:{target}:forcesubs+userbot')],
+             [button('Payment + Userbot',f'm:grant_kind:{target}:payment+userbot')],
+             [button('Semua Layanan',f'm:grant_kind:{target}:all')],HOME])
+
+    async def userbot_detail(self, user, target):
+        if user != target: self.db.master(user)
+        service = getattr(self.manager, 'userbots', None)
+        record = service.record(target) if service else None
+        if not record:
+            return await self.text(user,panel('✦ Ruangmu masih kosong', 'Belum ada Userbot terhubung.'),[[button('✨ Buat Userbot','m:create')],HOME])
+        active = target in service.running
+        body = f'<b>Akun:</b> {h(record["name"])}\n<b>Status:</b> {"🟢 Aktif" if active else "⚫ Berhenti"}'
+        if record['redeploy_required']: body += '\nHubungkan ulang setelah izinmu dipulihkan.'
+        buttons = [[button('🔗 Hubungkan Ulang','m:create')],[button('⚙️ Pengaturan Prefix','u:prefix')]] if user == target else []
+        return await self.text(user,panel('✦ ZΞI Userbot',body),buttons+[HOME])
 
     async def callback(self, user, data, message):
+        if data == 'u:prefix': return await self.prefix_prompt(user)
+        if data == 'u:mine': return await self.userbot_detail(user,user)
+        if data.startswith('u:owner:'): return await self.userbot_detail(user,int(data.split(':')[2]))
         if data == 'x:cancel':
             return await self.cancelled(user)
         if data == 'm:menu':
@@ -275,7 +316,8 @@ class MasterUI(BaseUI):
                 [[link_button('↗ Buka Bot', f'https://t.me/{row["username"]}'), button('‹ Detail Bot', back)]])
 
     async def message(self, user, message):
-        cmd, _ = command(message)
+        cmd, arg = command(message)
+        if cmd == '/start' and arg == 'uprefix': return await self.prefix_prompt(user)
         if cmd in ('/start', '/setting', '/settings', '/help'):
             return await self.menu(user)
         if cmd == '/buatbot':
@@ -284,6 +326,16 @@ class MasterUI(BaseUI):
         if not state:
             return await self.menu(user)
         text = message.get('text', '').strip()
+        if state['kind'] == 'userbot_prefix':
+            if not self.db.allowed(user,'userbot'): raise PermissionError('Izinmu sudah dicabut.')
+            from zei_userbot.state import State
+            service = self.manager.userbots
+            if not service.record(user): raise PermissionError('Userbot belum terhubung.')
+            settings = State(service.directory / str(user) / 'settings.sqlite')
+            try: settings.set('prefix',text)
+            finally: settings.close()
+            self.clear(user)
+            return await self.text(user,panel('✅ Prefix diperbarui',f'Sekarang gunakan <code>{h(text)}help</code> untuk membuka menu.'),[[button('✦ Userbot Saya','u:mine')]])
         if state['kind'] == 'grant':
             return await self.grant(user, self.positive_id(text))
         if state['kind'] == 'revoke':

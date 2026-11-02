@@ -1,4 +1,4 @@
-"""Zeisss SubGate entry point."""
+"""ZΞI Gate entry point."""
 import asyncio
 from subgate.app import main
 
