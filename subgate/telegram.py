@@ -95,7 +95,7 @@ class Poller:
         self.task = asyncio.create_task(self.run())
 
     async def dispatch(self, update):
-        subject = update.get('message') or update.get('callback_query') or {}
+        subject = update.get('message') or update.get('callback_query') or update.get('inline_query') or {}
         user = subject.get('from', {}).get('id', 0)
         lock = self.user_locks.setdefault(user, asyncio.Lock())
         async with lock:
@@ -113,7 +113,7 @@ class Poller:
         while True:
             try:
                 updates = await self.api.call('getUpdates', offset=offset, timeout=50,
-                    allowed_updates=['message', 'callback_query', 'chat_member'])
+                    allowed_updates=['message', 'callback_query', 'chat_member', 'inline_query'])
                 for update in updates:
                     await self.slots.acquire()
                     task = asyncio.create_task(self.dispatch(update))

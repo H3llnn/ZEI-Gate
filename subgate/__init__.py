@@ -1,1 +1,1 @@
-"""Zeisss SubGate — maintained by Zeisss."""
+"""ZΞI Gate — maintained by Zeisss."""

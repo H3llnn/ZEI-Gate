@@ -51,7 +51,7 @@ def instance_lock(directory):
                 import fcntl
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError('Instance SubGate lain sudah memakai DATA_DIR ini.') from None
+            raise RuntimeError('Instance ZEI Gate lain sudah memakai DATA_DIR ini.') from None
         try:
             yield
         finally:
@@ -73,7 +73,7 @@ async def main():
     with instance_lock(config.data):
         db = Store(config.data / 'subgate.sqlite', config.key, config.owner)
         api = API(config.token)
-        manager = poller = webhook = None
+        manager = poller = webhook = creation = None
         try:
             me = await api.call('getMe')
             manager = Manager(db, me['id'])
@@ -81,14 +81,33 @@ async def main():
             webhook=PaymentWebhook(db,manager,os.environ.get('PAYMENT_PUBLIC_BASE','') if os.environ.get('PAYMENT_ENABLE_WEBHOOK')=='1' else '',
                 os.environ.get('PAYMENT_BIND','127.0.0.1'),int(os.environ.get('PAYMENT_PORT','8080')))
             await webhook.start()
+            from .userbots import Userbots
+            manager.userbots = Userbots(db, config.data / 'userbots', me['username'])
+            if os.environ.get('CREATION_ENABLE') == '1':
+                from .creation import Creation
+                creation = Creation(db,manager,config.token,os.environ.get('CREATION_PUBLIC_BASE',''),me['username'],
+                    os.environ.get('CREATION_BIND','127.0.0.1'),int(os.environ.get('CREATION_PORT','8081')))
+                await creation.start()
+                manager.creation = creation
             ui = MasterUI(db, api, manager)
+            async def stopped_notice(owner):
+                await ui.durable(owner,'🔒 <b>Userbot dihentikan</b>\n\nIzin penggunaanmu telah dicabut. Hubungi pengelola jika ingin mengaktifkannya kembali.')
+            manager.userbots.notifier = stopped_notice
+            if creation:
+                async def notify(owner,kind,result):
+                    from .copy import panel, h
+                    text = (f'Userbot kamu sudah aktif. Ketik <code>{h(result.get("prefix","."))}help</code> dari akunmu untuk mulai 🤍'
+                            if kind == 'userbot' else f'@{h(result["username"])} sudah aktif. Buka botmu dan gunakan /setting untuk mulai 🤍')
+                    await ui.text(owner,panel('✨ Semuanya siap.',text),[[{'text':'⌂ Menu Utama','callback_data':'m:menu'}]])
+                creation.notifier = notify
             poller = Poller(api, ui.handle)
             await poller.start()
             await manager.restore()
             manager.maintenance_task = asyncio.create_task(manager.maintenance())
-            print(f"Zeisss SubGate aktif: @{me['username']}", flush=True)
+            print(f"ZΞI Gate aktif: @{me['username']}", flush=True)
             await asyncio.Future()
         finally:
+            if creation: await creation.close()
             if webhook: await webhook.close()
             if poller:
                 await poller.stop()

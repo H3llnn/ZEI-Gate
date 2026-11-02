@@ -80,7 +80,7 @@ class Saweria:
     async def request(self,url,payload=None):
         try:
             async with self.session.request('GET' if payload is None else 'POST',url,json=payload,
-                    timeout=aiohttp.ClientTimeout(total=25),headers={'User-Agent':'Zeisss-SubGate-Integration-Test/0.2'}) as response:
+                    timeout=aiohttp.ClientTimeout(total=25),headers={'User-Agent':'ZEI-Gate/0.1'}) as response:
                 if not 200<=response.status<300:
                     raise ValueError(f'Saweria HTTP {response.status}; belum ada konfirmasi pembayaran.')
                 chunks=[]; size=0
