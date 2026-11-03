@@ -10,7 +10,7 @@ ForceSubs · Payment · Userbot
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-8B5CF6?style=flat-square&logo=python&logoColor=white)
 [![GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-22D3EE?style=flat-square)](LICENSE)
 
-[**Mulai di laptop ↓**](#jalankan-di-laptop) · [**Dokumentasi**](docs/SUBGATE-LEGACY.md) · [**ZEI Userbot ↗**](https://github.com/H3llnn/ZEI-Userbot)
+[**Mulai di laptop ↓**](#jalankan-di-laptop) · [**Dokumentasi**](docs/README.md) · [**ZEI Userbot ↗**](https://github.com/H3llnn/ZEI-Userbot)
 
 </div>
 
@@ -37,8 +37,37 @@ Panduan terbaru: [menu izin, bantuan per perintah, dan paket gabungan](docs/UPDA
 | **🔐 Sesi terenkripsi** | OTP dan password 2FA tidak disimpan di database; formulir sementara memiliki batas waktu. |
 | **🔄 Koneksi ulang terjaga** | Proses lama dipertahankan sampai pengganti terverifikasi dan siap. |
 
-> **Status pengembangan:** 134 tes Gate dan 5 tes Userbot lulus pada pemeriksaan lokal. Aktivasi Telegram, login akun, dan transaksi nyata pada instalasi terbaru masih menunggu uji langsung. [Lihat hasil pemeriksaan](docs/STATUS.md).
+> **Pemeriksaan terakhir · 3 November 2026:** 153 tes Gate lulus; 5 tes Userbot lulus pada pemeriksaan sebelumnya. Uji pembayaran, bergabung, dan tombol bantuan pada versi terbaru tetap perlu dilakukan langsung. [Hasil dan batas pemeriksaan](docs/STATUS.md).
 
+
+## Dari izin sampai layananmu aktif
+
+```mermaid
+flowchart LR
+    A[Owner memberi izin] --> B[Pengguna membuka bot induk]
+    B --> C[Mini App pembuatan]
+    C --> D[Bot ForceSubs]
+    C --> E[Bot Payment]
+    C --> F[Akun Userbot]
+```
+
+### Yang tersedia sekarang
+
+- **ForceSubs:** link konten, syarat bergabung, tombol Coba Lagi, pengaturan channel database, dan penghapusan konten terjadwal.
+- **Payment:** QRIS di chat, pemeriksaan otomatis dengan tombol cadangan, akses satuan atau gabungan, riwayat pembelian berhasil, dan notifikasi ke owner.
+- **Userbot:** 38 perintah, prefix yang bisa diganti, serta bantuan kategori → perintah → cara pakai dan contoh.
+- **Bot induk:** nama Telegram pada daftar pengguna dan tiga tombol izin yang bisa diaktifkan atau dicabut terpisah.
+
+## Panduan sesuai kebutuhanmu
+
+| Kebutuhan | Panduan |
+| :--- | :--- |
+| Baru mengenal proyek ini | [Pertanyaan umum](docs/FAQ.md) |
+| Memasang pertama kali | [Jalankan di laptop](#jalankan-di-laptop) |
+| Memakai hosting dengan Mini App | [Aktifkan formulir](#aktifkan-formulir-pembuatan) |
+| Memperbarui versi yang sudah berjalan | [Update, backup, dan pemulihan](docs/UPDATE-GUIDE.md) |
+| Melihat fitur pembaruan terbaru | [Catatan pembaruan](docs/UPDATE-2026-11-03.md) |
+| Mencari semua dokumentasi | [Pusat dokumentasi](docs/README.md) |
 
 ## Jalankan di laptop
 
