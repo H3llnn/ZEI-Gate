@@ -12,8 +12,8 @@ from .display import Display
 from .store import Store
 
 TABLES = ('bots','admins','targets','links','users','jobs','content','incidents','payment_accounts',
-          'payment_packages','payment_orders','payment_events','payment_started','payment_qr_messages','display_screens','userbots')
-ENCRYPTED = {'bots':('credentials',),'payment_accounts':('secret',),'payment_orders':('qr','invite'),'userbots':('credentials',)}
+          'payment_packages','payment_orders','payment_events','payment_started','payment_qr_messages','display_screens','userbots','telegram_profiles')
+ENCRYPTED = {'bots':('credentials',),'payment_accounts':('secret',),'payment_orders':('qr','invite','accesses'),'userbots':('credentials',)}
 
 
 def quote(name):
@@ -85,6 +85,7 @@ def merge(force_folder, payment_folder, output):
                         where=' AND '.join(quote(k)+'=?' for k in primary)
                         existing=target.rows('SELECT * FROM '+quote(table)+' WHERE '+where,tuple(row[k] for k in primary))
                         if existing:
+                            if table=='telegram_profiles': continue
                             if table=='bots' and row['id'] in overlap:
                                 columns=[key for key in row if key!='id']
                                 target.conn.execute('UPDATE bots SET '+','.join(quote(c)+'=?' for c in columns)+' WHERE id=?',tuple(row[c] for c in columns)+(row['id'],))

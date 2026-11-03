@@ -26,6 +26,8 @@ ForceSubs · Payment · Userbot
 | **💳 Payment** | Jual akses channel/grup melalui QRIS, verifikasi pembayaran, dan kirim link akses. |
 | **⚡ Userbot** | Hubungkan akun pribadi, atur prefix, dan gunakan 38 perintah dari akun sendiri. |
 
+Panduan terbaru: [menu izin, bantuan per perintah, dan paket gabungan](docs/UPDATE-2026-11-03.md).
+
 ## Kendali yang jelas, alur yang rapi
 
 | | |

@@ -27,6 +27,7 @@ class Store:
             PRAGMA journal_mode=WAL;
             PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS creators (id INTEGER PRIMARY KEY, allowed INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS telegram_profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS bots (
                 id INTEGER PRIMARY KEY, owner INTEGER NOT NULL, username TEXT NOT NULL,
                 credentials BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1,
@@ -93,6 +94,16 @@ class Store:
     def display_name(self, bot, name):
         with self.conn:
             self.conn.execute('UPDATE bots SET name=? WHERE id=?', (name, bot))
+
+    def telegram_profile(self, user, sender=None):
+        if sender is not None:
+            name = ' '.join(sender.get(key) or '' for key in ('first_name', 'last_name')).strip()
+            if name:
+                with self.conn:
+                    self.conn.execute('INSERT INTO telegram_profiles VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,username=excluded.username',
+                                      (user, name, sender.get('username') or ''))
+        rows = self.rows('SELECT * FROM telegram_profiles WHERE id=?', (user,))
+        return rows[0] if rows else {}
 
     def content(self, bot, chat, message_id, metadata=None):
         if metadata is not None:

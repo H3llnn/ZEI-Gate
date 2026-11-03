@@ -31,6 +31,8 @@ class PaymentService:
     async def create(self,user,package,name,email):
         p=self.store.package(self.bot,package)
         info=await self.target(p['target'])
+        for target in p['targets']:
+            if target['target'] != p['target']: await self.target(target['target'])
         order=self.store.new_order(self.bot,user,package,buyer_name=name,target_kind='channel' if info['type']=='channel' else 'group')
         account=self.store.account(order['owner'])
         try:
@@ -88,6 +90,8 @@ class PaymentService:
                     await self.api.call('sendMessage',chat_id=order['owner'],parse_mode='HTML',text=panel('🔔 Pembayaran diterima',await self.summary(order)),link_preview_options={'is_disabled':True})
                     self.store.update(self.bot,ident,notified=1)
                 except TelegramFailure: pass
+            if order['accesses']:
+                return await self.fulfill_bundle(order)
             if order['used']:
                 if not order['revoked'] and order['invite']:
                     try:
@@ -142,12 +146,84 @@ class PaymentService:
         if not joined: return
         url=event.get('invite_link',{}).get('invite_link')
         if not url: return
+        matched=None
+        async with self.lock:
+            for row in self.db.rows("SELECT id FROM payment_orders WHERE bot=? AND payment='verified' AND used=0 AND accesses IS NOT NULL", (self.bot,)):
+                order=self.store.order(self.bot,row['id'])
+                for access in order['accesses']:
+                    if access['target']==event.get('chat',{}).get('id') and access['invite']==url and not access['used']:
+                        access['used']=1
+                        self.store.update(self.bot,order['id'],accesses=order['accesses'],bundle_revoke=1,
+                                          used=int(all(a['used'] for a in order['accesses'])),work_due=0)
+                        matched=order['id']
+                        break
+                if matched: break
+        if matched:
+            await self.fulfill(matched)
+            return
         for row in self.db.rows("SELECT id FROM payment_orders WHERE bot=? AND target=? AND payment='verified' AND used=0 AND invite IS NOT NULL", (self.bot,event.get('chat',{}).get('id'))):
             order=self.store.order(self.bot,row['id'])
             if order['invite']==url:
                 self.store.update(self.bot,row['id'],used=1)
                 await self.fulfill(row['id'])
                 return
+
+    async def fulfill_bundle(self,order):
+        accesses=order['accesses']
+        for index,access in enumerate(accesses):
+            if access['used']:
+                if access['invite'] and not access['revoked']:
+                    try:
+                        await self.api.call('revokeChatInviteLink',chat_id=access['target'],invite_link=access['invite'])
+                        access['revoked']=1
+                        self.store.update(self.bot,order['id'],accesses=accesses)
+                    except TelegramFailure:
+                        await self.access_failure(order,'revoke:'+str(index))
+                continue
+            if access['invite']: continue
+            record=self.db.bot(self.bot)
+            if not record['active'] or not self.db.allowed(order['owner'],'payment'): break
+            if access['delivery'] in ('creating','uncertain'):
+                await self.notice('payment:uncertain:'+order['id']+':'+str(index),panel('Periksa undangan pesanan 🔎',
+                    'Periksa link bernama SG-'+h(order['id'])+'-'+str(index)+'. Bot tidak membuat undangan kedua secara otomatis.'))
+                continue
+            try:
+                info=await self.target(access['target'])
+            except (ValueError,TelegramFailure):
+                await self.access_failure(order,'target:'+str(index))
+                continue
+            access['target_kind']='channel' if info['type']=='channel' else 'group'
+            access['delivery']='creating'
+            self.store.update(self.bot,order['id'],accesses=accesses)
+            try:
+                invite=await self.api.call('createChatInviteLink',chat_id=access['target'],
+                    name='SG-'+order['id']+'-'+str(index),member_limit=1)
+                url=invite['invite_link']
+                if not isinstance(url,str) or not url.startswith('https://t.me/+'): raise ValueError('Undangan tidak dikenali.')
+                access.update(invite=url,delivery='ready')
+            except (ValueError,TelegramFailure) as exc:
+                access['delivery']='ready' if isinstance(exc,TelegramFailure) and exc.code<500 else 'uncertain'
+                await self.access_failure(order,'invite:'+str(index))
+            self.store.update(self.bot,order['id'],accesses=accesses)
+        self.store.update(self.bot,order['id'],bundle_revoke=int(any(a['used'] and not a['revoked'] for a in accesses)),
+                          used=int(all(a['used'] for a in accesses)),revoked=int(all(a['revoked'] for a in accesses)))
+        record=self.db.bot(self.bot)
+        if (order['delivered'] or not all(a['invite'] or a['used'] for a in accesses)
+                or not record['active'] or not self.db.allowed(order['owner'],'payment')): return
+        try:
+            await self.api.call('sendMessage',chat_id=order['buyer'],parse_mode='HTML',text=panel('✨ Pembayaran berhasil!',
+                f'💎 Akses: <b>{h(order["name"])}</b>\n\nSemua aksesmu sudah siap. Selamat menikmati 🤍'),
+                reply_markup=inline(self.access_buttons(order)))
+            from .display import Display
+            await Display(self.db.conn,self.api).replace(self.bot,order['buyer'],[])
+            self.store.update(self.bot,order['id'],delivered=1,delivery='sent')
+        except TelegramFailure:
+            await self.access_failure(order,'delivery')
+
+    def access_buttons(self,order):
+        if order['accesses']:
+            return [[link_button('🔗 '+a['name'],a['invite'])] for a in order['accesses'] if a['invite'] and not a['used']]
+        return [[self.access_button(order)]] if order['invite'] and not order['used'] else []
 
     async def tick(self,active=True):
         await self.cleanup_qr()

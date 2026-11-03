@@ -138,7 +138,7 @@ class Manager:
                     runner = self.running.get(record['id'])
                     if runner:
                         api = runner.api
-                    elif self.db.due(time.time(), record['id']) or (record['kind']=='payment' and self.db.rows("SELECT 1 FROM payment_orders WHERE bot=? AND (payment='late' AND notified=0 OR used=1 AND revoked=0) LIMIT 1",(record['id'],))):
+                    elif self.db.due(time.time(), record['id']) or (record['kind']=='payment' and self.db.rows("SELECT 1 FROM payment_orders WHERE bot=? AND (payment='late' AND notified=0 OR used=1 AND revoked=0 OR bundle_revoke=1) LIMIT 1",(record['id'],))):
                         # Stopped bots still clean up already scheduled messages, without polling.
                         api = API(self.db.credentials(record['id'])['token'])
                         temporary = True

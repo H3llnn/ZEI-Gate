@@ -42,6 +42,12 @@ def migrate(db):
     if 'position' not in package_columns:
         db.conn.execute('ALTER TABLE payment_packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0')
         db.conn.execute('UPDATE payment_packages SET position=id')
+    if 'targets' not in package_columns:
+        db.conn.execute("ALTER TABLE payment_packages ADD COLUMN targets TEXT NOT NULL DEFAULT '[]'")
+    if 'accesses' not in columns:
+        db.conn.execute('ALTER TABLE payment_orders ADD COLUMN accesses BLOB')
+    if 'bundle_revoke' not in columns:
+        db.conn.execute('ALTER TABLE payment_orders ADD COLUMN bundle_revoke INTEGER NOT NULL DEFAULT 0')
     db.conn.executescript('\n        CREATE TABLE IF NOT EXISTS payment_started(bot INTEGER NOT NULL,user INTEGER NOT NULL,PRIMARY KEY(bot,user));\n        CREATE TABLE IF NOT EXISTS payment_qr_messages(bot INTEGER NOT NULL,order_id TEXT NOT NULL,chat INTEGER NOT NULL,message_id INTEGER NOT NULL,cleared INTEGER NOT NULL DEFAULT 0,next_try REAL NOT NULL DEFAULT 0,PRIMARY KEY(bot,chat,message_id));\n    ')
     for row in db.rows('SELECT id,settings FROM bots WHERE kind=?',('payment',)):
         values=json.loads(row['settings'])
@@ -84,21 +90,42 @@ class PaymentStore:
         return row
 
     def packages(self, bot, owner=False):
-        return self.db.rows("SELECT * FROM payment_packages WHERE bot=? AND status != 'deleted'" +
+        rows = self.db.rows("SELECT * FROM payment_packages WHERE bot=? AND status != 'deleted'" +
                             ('' if owner else " AND status='active'") + ' ORDER BY position,id', (bot,))
+        for row in rows: row['targets'] = json.loads(row['targets'])
+        return rows
 
     def package(self, bot, ident):
         rows = self.db.rows('SELECT * FROM payment_packages WHERE bot=? AND id=?', (bot,ident))
         if not rows: raise ValueError('Akses ini sedang tidak tersedia. Pilih akses lainnya, ya 🤍')
+        rows[0]['targets'] = json.loads(rows[0]['targets'])
         return rows[0]
+
+    def bundle_saving(self, bot, package):
+        if not package['targets']: return None
+        singles = self.packages(bot)
+        total = 0
+        for target in package['targets']:
+            prices = [p['price'] for p in singles if not p['targets'] and p['target']==target['target']]
+            if not prices: return None
+            total += min(prices)
+        return (total, total-package['price']) if total > package['price'] else None
 
     def save_package(self, bot, actor, ident=None, **values):
         self.staff(bot,actor)
         if actor!=self.db.bot(bot)['owner'] and (ident is None or not set(values)<= {'name','description','photo'}):
             raise PermissionError('Admin hanya boleh mengubah nama, deskripsi dan foto akses.')
         if self.db.bot(bot)['kind'] != 'payment': raise ValueError('Bukan bot Payment.')
-        base = self.package(bot,ident) if ident else dict(name='',description='',price=0,target=0,photo=None)
+        base = self.package(bot,ident) if ident else dict(name='',description='',price=0,target=0,photo=None,targets=[])
         base.update(values)
+        targets = base['targets']
+        if not isinstance(targets,list): raise ValueError('Pilih isi paket yang valid.')
+        if targets:
+            if len(targets)<2 or any(not isinstance(t,dict) or type(t.get('target')) is not int or t['target']>=0
+                    or not isinstance(t.get('name'),str) or not 1<=len(t['name'])<=80 for t in targets):
+                raise ValueError('Paket gabungan harus berisi minimal dua tujuan dengan nama yang valid.')
+            if len({t['target'] for t in targets})!=len(targets): raise ValueError('Tujuan paket tidak boleh berulang.')
+            base['target'] = targets[0]['target']
         if type(base['price']) is int and base['price']<1000: raise MinimumPriceError('Harga minimal Rp1.000')
         if (not isinstance(base['name'],str) or not 1 <= len(base['name'].strip()) <= 80 or
             not isinstance(base['description'],str) or len(base['description']) > 1000 or
@@ -115,6 +142,8 @@ class PaymentStore:
                 ident = self.conn.execute('INSERT INTO payment_packages(name,description,price,target,photo,bot) VALUES (?,?,?,?,?,?)', (*args,bot)).lastrowid
                 position=self.conn.execute('SELECT COALESCE(MAX(position),0)+1 FROM payment_packages WHERE bot=?',(bot,)).fetchone()[0]
                 self.conn.execute('UPDATE payment_packages SET position=? WHERE id=?',(position,ident))
+            self.conn.execute('UPDATE payment_packages SET targets=? WHERE bot=? AND id=?',
+                              (json.dumps(targets),bot,ident))
         return ident
 
     def package_status(self, bot, actor, ident, status):
@@ -139,6 +168,11 @@ class PaymentStore:
         with self.conn:
             self.conn.execute('''INSERT INTO payment_orders(id,bot,buyer,owner,package,name,target,price,recipient,created,buyer_name,target_kind)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', (ident,bot,buyer,record['owner'],package,p['name'],p['target'],p['price'],account['recipient'],time.time(),buyer_name,target_kind))
+            if p['targets']:
+                accesses=[dict(target=t['target'],name=t['name'],target_kind='',invite=None,
+                               delivery='ready',used=0,revoked=0) for t in p['targets']]
+                self.conn.execute('UPDATE payment_orders SET accesses=? WHERE id=?',
+                                  (self.seal(json.dumps(accesses)),ident))
         return self.order(bot,ident)
 
     def order(self, bot, ident, buyer=None):
@@ -148,6 +182,7 @@ class PaymentStore:
         if buyer is not None and row['buyer'] != buyer: raise PermissionError('Pesanan bukan milikmu.')
         row['qr'] = self.open(row['qr'])
         row['invite'] = self.open(row['invite'])
+        row['accesses'] = json.loads(self.open(row['accesses']) or '[]')
         return row
 
     def attach(self, ident, transaction, qr, total):
@@ -188,9 +223,10 @@ class PaymentStore:
         return status
 
     def update(self, bot, ident, **values):
-        allowed = {'delivery','invite','invite_name','used','revoked','notified','delivered','checked','work_due','buyer_name','target_kind'}
+        allowed = {'delivery','invite','invite_name','used','revoked','notified','delivered','checked','work_due','buyer_name','target_kind','accesses','bundle_revoke'}
         if not values or not set(values) <= allowed: raise ValueError('Field tidak valid.')
         if 'invite' in values: values['invite'] = self.seal(values['invite'])
+        if 'accesses' in values: values['accesses'] = self.seal(json.dumps(values['accesses']))
         with self.conn:
             self.conn.execute('UPDATE payment_orders SET '+','.join(k+'=?' for k in values)+' WHERE bot=? AND id=?', (*values.values(),bot,ident))
 
@@ -201,7 +237,7 @@ class PaymentStore:
         return self.db.rows("SELECT id FROM payment_orders WHERE bot=? AND transaction_id IS NOT NULL AND payment='pending' AND checked<=? ORDER BY checked,created LIMIT ?", (bot,now-30,limit))
 
     def work(self, bot):
-        return self.db.rows("SELECT id FROM payment_orders WHERE bot=? AND work_due<=? AND ((payment='verified' AND (delivered=0 OR notified=0 OR (used=1 AND revoked=0))) OR (payment='late' AND notified=0)) ORDER BY work_due,created LIMIT 30", (bot,time.time()))
+        return self.db.rows("SELECT id FROM payment_orders WHERE bot=? AND work_due<=? AND ((payment='verified' AND (delivered=0 OR notified=0 OR bundle_revoke=1 OR (used=1 AND revoked=0))) OR (payment='late' AND notified=0)) ORDER BY work_due,created LIMIT 30", (bot,time.time()))
 
     def staff(self,bot,actor):
         if actor!=self.db.bot(bot)['owner'] and actor not in self.db.admins(bot):

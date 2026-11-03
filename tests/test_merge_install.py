@@ -71,6 +71,23 @@ class MergeTests(unittest.TestCase):
             self.assertEqual(PaymentStore(db).order(100,self.order)['qr'],'QR-PRIVATE')
         finally:db.close()
 
+    def test_bundle_invites_reencrypt_and_profiles_survive(self):
+        db=Store(self.folders[1]/'subgate.sqlite',self.keys[1],1)
+        pay=PaymentStore(db)
+        pkg=pay.save_package(100,2,name='Gabungan',description='',price=1500,
+            targets=[{'target':-1001,'name':'A'},{'target':-1002,'name':'B'}])
+        order=pay.new_order(100,3,pkg)
+        order['accesses'][0]['invite']='https://t.me/+private-bundle'
+        pay.update(100,order['id'],accesses=order['accesses'])
+        db.telegram_profile(3,{'first_name':'Budi','username':'budi'})
+        db.close()
+        merge(*self.folders,self.root/'output')
+        db=Store(self.root/'output/data/subgate.sqlite',self.keys[0],1)
+        try:
+            self.assertEqual(PaymentStore(db).order(100,order['id'])['accesses'][0]['invite'],'https://t.me/+private-bundle')
+            self.assertEqual(db.telegram_profile(3)['name'],'Budi')
+        finally:db.close()
+
     def test_overlapping_admins_do_not_gain_other_service_privileges(self):
         import asyncio
         from subgate.service import Delivery

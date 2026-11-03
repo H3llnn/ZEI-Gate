@@ -81,7 +81,8 @@ class PaymentUI(BaseUI):
         if page: moves.append(button('‹ Sebelumnya',f'p:{prefix}:{page-1}'))
         if (page+1)*8<len(rows): moves.append(button('Berikutnya ›',f'p:{prefix}:{page+1}'))
         if moves: buttons.append(moves)
-        if manage and user==self.db.bot(self.bot)['owner']: buttons.append([button('＋ Tambah Akses','p:new')])
+        if manage and user==self.db.bot(self.bot)['owner']:
+            buttons += [[button('＋ Tambah Akses','p:new')],[button('💎 Tambah Paket Gabungan','p:bundle_new')]]
         buttons.append(HOME)
         await self.text(user,panel('✨ Pilih yang kamu suka','Ketuk salah satu akses untuk melihat detailnya 🤍') if rows else panel('🌙 Belum ada akses tersedia','Mampir lagi nanti, ya 🤍'),buttons)
 
@@ -91,10 +92,21 @@ class PaymentUI(BaseUI):
         if p['status']=='deleted' or (not manage and p['status']!='active'): raise ValueError('Akses tidak tersedia.')
         self.clear(user)
         body=f'{h(p["description"])}\n\n💰 Harga akses: <b>Rp{p["price"]:,}</b>\n🔑 Sekali beli, akses permanen untuk satu orang.'
+        if p['targets']:
+            money=lambda n:f'{n:,}'.replace(',','.')
+            included='\n'.join('✓ '+h(t['name']) for t in p['targets'])
+            body=f'{h(p["description"])}\n\n<b>Termasuk:</b>\n{included}\n\n'
+            saving=self.store.bundle_saving(self.bot,p)
+            if saving: body+=f'Harga satuan: Rp{money(saving[0])}\n'
+            body+=f'💰 <b>Harga paket: Rp{money(p["price"])}</b>'
+            if saving: body+=f'\n✨ Hemat Rp{money(saving[1])}'
+            body+='\n\n🔓 Akses permanen · Link masuk masing-masing untuk satu orang.'
         if manage:
             body+=f'\nTarget: {p["target"]}\nStatus: {h(p["status"])}'
             buttons=[[button(label,f'p:edit:{ident}:{field}') for label,field in pair] for pair in
                      ((('Nama','name'),('Deskripsi','description')),(('Harga','price'),('Target','target')),(('Foto','photo'),))]
+            if p['targets']:
+                buttons[1]=[button('Harga',f'p:edit:{ident}:price'),button('Isi Paket',f'p:bundle_edit:{ident}')]
             buttons += [[button('Aktifkan' if p['status']=='inactive' else 'Nonaktifkan',f'p:ask:{ident}:active' if p['status']=='inactive' else f'p:ask:{ident}:inactive'),button('Hapus',f'p:ask:{ident}:deleted')],[button('‹ Kembali','p:manage:0')]]
         else:
             buttons=[[button('💳 Beli Akses',f'p:buy:{ident}')],[button('‹ Kembali','p:list:0')]]
@@ -102,6 +114,23 @@ class PaymentUI(BaseUI):
             body=f'{h(p["description"])}\n\n💰 Harga: Rp{p["price"]:,}'
             buttons=[[button('Nama',f'p:edit:{ident}:name'),button('Deskripsi',f'p:edit:{ident}:description')],[button('Foto',f'p:edit:{ident}:photo')],[button('‹ Kembali','p:manage:0')]]
         await self.photo_text(user,p['photo'],panel(h(p['name']),body),buttons)
+
+    async def bundle_picker(self,user,page=0):
+        self.owner(user)
+        state=self.state(user)
+        if not state or state['kind']!='bundle_targets': raise ValueError('Sesi pemilihan isi paket berakhir.')
+        choices={p['target']:{'target':p['target'],'name':p['name']} for p in self.store.packages(self.bot) if not p['targets']}
+        for target in state['selected']: choices.setdefault(target['target'],target)
+        rows=list(choices.values())
+        page=max(0,min(page,max(0,(len(rows)-1)//8)))
+        selected={t['target'] for t in state['selected']}
+        buttons=[[button(('✅ ' if t['target'] in selected else '▫️ ')+t['name'],f'p:bundle_pick:{t["target"]}:{page}')] for t in rows[page*8:(page+1)*8]]
+        moves=[]
+        if page:moves.append(button('‹ Sebelumnya',f'p:bundle_page:{page-1}'))
+        if (page+1)*8<len(rows):moves.append(button('Berikutnya ›',f'p:bundle_page:{page+1}'))
+        if moves:buttons.append(moves)
+        buttons += [[button('💾 Simpan Paket', 'p:bundle_done')],[button('✖️ Batalkan','x:cancel')]]
+        await self.text(user,panel('💎 Pilih isi paket',f'{len(selected)} tujuan dipilih. Pilih minimal dua akses satuan.\nTekan kembali untuk membatalkan pilihan.\n\nAkses satuan tetap tersedia untuk pembeli.'),buttons)
 
     async def settings(self,user):
         self.staff(user); self.clear(user)
@@ -140,7 +169,11 @@ class PaymentUI(BaseUI):
             body=f'📦 Akses: {h(order["name"])}\n💰 Harga: Rp{price}\n✅ Pembayaran berhasil'
             buttons=[]
             if order['used']: body+='\n\n🔒 Akses sudah digunakan\nLink ini sudah dipakai untuk bergabung.'
-            elif order['invite']: buttons=[[self.service.access_button(order)]]
+            elif order['accesses']:
+                buttons=self.service.access_buttons(order)
+                body+='\n\n'+'\n'.join(('✅ ' if a['used'] else '🔗 ')+h(a['name']) for a in order['accesses'])
+                if not order['delivered']: body+='\nAkses sedang disiapkan.'
+            elif order['invite']: buttons=self.service.access_buttons(order)
             else: body+='\n\nAkses sedang disiapkan.'
             if not order['used'] and not order['delivered']:
                 buttons.append([button('🔄 Coba Kirim Link Lagi',f'p:retry:{order["id"]}')])
@@ -224,6 +257,34 @@ class PaymentUI(BaseUI):
             if not await self.broadcast.stop(user,parts[2]): raise PermissionError('Hanya pembuat broadcast yang boleh menghentikannya.')
             return
         self.staff(user)
+        if data.startswith('p:bundle'):
+            self.owner(user)
+            if data=='p:bundle_new':
+                self.wait(user,'new_package',step='name',values={},bundle=True)
+                return await self.text(user,'Kirim nama paket gabungan (maksimal 80 karakter).',[[button('✖️ Batal','x:cancel')]])
+            if data.startswith('p:bundle_edit:'):
+                ident=int(parts[2]);p=self.store.package(self.bot,ident)
+                if not p['targets']: raise ValueError('Ini bukan paket gabungan.')
+                self.wait(user,'bundle_targets',ident=ident,values={},selected=[dict(t) for t in p['targets']])
+                return await self.bundle_picker(user)
+            state=self.state(user)
+            if not state or state['kind']!='bundle_targets': raise ValueError('Sesi pemilihan isi paket berakhir.')
+            if data.startswith('p:bundle_page:'):return await self.bundle_picker(user,int(parts[2]))
+            if data.startswith('p:bundle_pick:'):
+                target=int(parts[2])
+                existing=next((t for t in state['selected'] if t['target']==target),None)
+                if existing:state['selected'].remove(existing)
+                else:
+                    p=next((p for p in self.store.packages(self.bot) if not p['targets'] and p['target']==target),None)
+                    if not p:raise ValueError('Akses satuan tidak tersedia.')
+                    state['selected'].append({'target':target,'name':p['name']})
+                return await self.bundle_picker(user,int(parts[3]))
+            if data=='p:bundle_done':
+                if len(state['selected'])<2:raise ValueError('Pilih minimal dua tujuan untuk paket gabungan.')
+                for target in state['selected']:await self.service.target(target['target'])
+                ident=self.store.save_package(self.bot,user,state['ident'],**state['values'],targets=state['selected'])
+                return await self.package(user,ident,True)
+            raise ValueError('Pilihan paket tidak dikenal.')
         if data.startswith('bc:send:'):
             state=self.state(user)
             if not state or state['kind']!='broadcast_confirm' or state.get('nonce')!=parts[2]: raise ValueError('Konfirmasi broadcast sudah berakhir.')
@@ -300,6 +361,7 @@ class PaymentUI(BaseUI):
             field=parts[3]
             if user!=self.db.bot(self.bot)['owner'] and field not in ('name','description','photo'): raise PermissionError('Bagian ini hanya untuk owner.')
             if field not in ('name','description','price','target','photo'): raise ValueError('Field tidak dikenal.')
+            if field=='target' and self.store.package(self.bot,ident)['targets']:raise ValueError('Gunakan Isi Paket untuk mengubah tujuan paket gabungan.')
             self.wait(user,'edit_package',ident=ident,field=field)
             return await self.text(user,'Kirim '+('foto sebagai foto, atau ketik hapus untuk menghapus foto.' if field=='photo' else field+' baru.'),[[button('✖️ Batal','x:cancel')]])
         if data.startswith('p:ask:'):
@@ -397,12 +459,15 @@ class PaymentUI(BaseUI):
         if state['kind']=='new_package':
             field=state['step']
             state['values'][field]=await self.package_value(field,text,message)
-            fields=('name','description','price','target')
+            fields=('name','description','price') if state.get('bundle') else ('name','description','price','target')
             index=fields.index(field)+1
             if index<len(fields):
                 state['step']=fields[index]
                 prompts={'description':'Kirim deskripsi akses (maksimal 1000 karakter).','price':'Kirim harga akses dalam rupiah, tanpa titik.','target':'Kirim ID channel/grup privat (ID negatif). Bot harus admin dengan izin undangan.'}
                 return await self.text(user,prompts[state['step']],[[button('✖️ Batal','x:cancel')]])
+            if state.get('bundle'):
+                self.wait(user,'bundle_targets',ident=None,values=state['values'],selected=[])
+                return await self.bundle_picker(user)
             ident=self.store.save_package(self.bot,user,**state['values'])
             return await self.package(user,ident,True)
 

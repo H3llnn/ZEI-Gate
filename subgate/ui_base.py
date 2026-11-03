@@ -131,6 +131,7 @@ class BaseUI:
             return
         user, message, callback = subject
         sender = (callback or message).get('from', {})
+        self.db.telegram_profile(user, sender)
         self.names[user] = ' '.join(sender.get(key) or '' for key in ('first_name', 'last_name')).strip() or 'teman'
         try:
             if callback:

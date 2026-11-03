@@ -1,8 +1,11 @@
 """Factory menus and confirmed owner-only lifecycle actions."""
+import asyncio
+from collections import defaultdict
 import re
 import time
 from .ui_base import BaseUI, command
 from .copy import h, panel, button, link_button, nav
+from .service import inline, TelegramFailure
 
 HOME = [button('⌂ Menu Utama', 'm:menu')]
 API_BUTTON = link_button('🔑 Ambil API ID & Hash', 'https://my.telegram.org/auth')
@@ -12,6 +15,7 @@ class MasterUI(BaseUI):
     def __init__(self, db, api, manager):
         super().__init__(db, api)
         self.manager = manager
+        self.permission_locks = defaultdict(asyncio.Lock)
 
     async def handle(self, update):
         creation = getattr(self.manager, 'creation', None)
@@ -150,7 +154,7 @@ class MasterUI(BaseUI):
         rows = self.db.creators()
         page = max(0, min(page, max(0, (len(rows)-1)//12)))
         active = sum(bool(r['allowed']) for r in rows)
-        buttons = [[button(('🟢' if r['allowed'] else '🔒')+f' {r["id"]}', f'm:user:{r["id"]}')]
+        buttons = [[button(await self.user_name(r['id']), f'm:user:{r["id"]}')]
                    for r in rows[page*12:(page+1)*12]]
         pages = []
         if page:
@@ -170,13 +174,38 @@ class MasterUI(BaseUI):
         allowed = self.db.allowed(target)
         buttons = [[button('🔒 Cabut Akses' if allowed else '🔑 Beri Akses',
                           f'm:revoke_ask:{target}' if allowed else f'm:grant_id:{target}')],
-                   [button('Ubah Jenis Izin',f'm:grant_id:{target}')],
+                   [button('Ubah Jenis Izin',f'm:permissions:{target}')],
                    [button('🤖 Bot Pengguna', f'm:owned:{target}:0')],
                    [button('✦ Userbot Pengguna', f'u:owner:{target}')],
                    [button('‹ Daftar Pengguna', 'm:users:0')], HOME]
         await self.text(user, panel('Detail akses pengguna 👤',
             f'<b>ID:</b> {target}\n<b>Akses:</b> {"🟢 Diizinkan" if allowed else "🔒 Dicabut"}\n'
             f'<b>Jenis izin:</b> {h(", ".join(k for k in ("forcesubs","payment","userbot") if self.db.allowed(target,k)) or "Tidak ada")}\n<b>Jumlah bot:</b> {len(self.db.bots(target))}'), buttons)
+
+    async def user_name(self, target):
+        profile = self.db.telegram_profile(target)
+        if not profile:
+            try:
+                sender = await self.api.call('getChat', chat_id=target)
+                if isinstance(sender, dict):
+                    profile = self.db.telegram_profile(target, sender)
+            except TelegramFailure:
+                pass
+        return profile.get('name') or 'Pengguna Telegram'
+
+    async def permissions(self, user, target, message):
+        self.db.master(user)
+        self.clear(user)
+        kinds = [('userbot', 'Userbot'), ('payment', 'Payment'), ('forcesubs', 'ForceSubs')]
+        granted = ', '.join(label for kind, label in kinds if self.db.allowed(target, kind)) or 'Tidak ada'
+        name = await self.user_name(target)
+        text = panel('Ubah Jenis Izin 🔑', f'<b>Izin aktif:</b> {h(granted)}\n<b>Pengguna:</b> {h(name)}\n\n'
+            'Tekan layanan untuk mengubah izin. Pencabutan menghentikan layanan terkait; setelah izin pulih, pengguna perlu deploy ulang.')
+        buttons = [[button(('✅ ' if self.db.allowed(target, kind) else '❌ ') + label,
+                           f'm:permission_toggle:{target}:{kind}')] for kind, label in kinds]
+        buttons += [[button('‹ Detail Pengguna', f'm:user:{target}')], HOME]
+        return await self.api.call('editMessageText', chat_id=user, message_id=message['message_id'],
+                                   text=text, parse_mode='HTML', reply_markup=inline(buttons))
 
     async def ask_revoke(self, user, target, kind=None):
         self.db.master(user)
@@ -247,6 +276,18 @@ class MasterUI(BaseUI):
             context = ':'.join(parts[3:-1])
             return await self.detail(user, int(parts[2]), context, int(parts[-1]))
         self.db.master(user)
+        if data.startswith('m:permissions:'):
+            return await self.permissions(user, int(parts[2]), message)
+        if data.startswith('m:permission_toggle:'):
+            target, kind = int(parts[2]), parts[3]
+            if kind not in ('userbot', 'payment', 'forcesubs'):
+                raise ValueError('Pilih satu layanan dari menu izin terbaru.')
+            async with self.permission_locks[target]:
+                if self.db.allowed(target, kind):
+                    await self.manager.revoke(user, target, kind)
+                else:
+                    await self.manager.grant(user, target, kind, preserve=True)
+                return await self.permissions(user, target, message)
         if data in ('m:grant', 'm:revoke'):
             self.wait(user, parts[1], back='m:menu')
             if parts[1] == 'grant':
