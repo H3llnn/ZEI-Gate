@@ -83,9 +83,9 @@ class Manager:
                 raise ValueError('Bot tersimpan tetapi belum dapat aktif. Coba deploy lagi.') from None
         return me
 
-    async def grant(self, actor, owner, kind):
+    async def grant(self, actor, owner, kind, *, preserve=False):
         async with self.lock:
-            self.db.grant(actor,owner,kind)
+            self.db.grant(actor,owner,kind,preserve=preserve)
             if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots(owner):
                 if not self.db.allowed(owner,record['kind']):

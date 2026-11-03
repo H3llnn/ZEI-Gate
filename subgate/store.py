@@ -125,13 +125,15 @@ class Store:
             rows = self.rows('SELECT allowed FROM creators WHERE id=?', (user,))
         return bool(rows and rows[0]['allowed'])
 
-    def grant(self, actor, user, kind='forcesubs'):
+    def grant(self, actor, user, kind='forcesubs', *, preserve=False):
         self.master(actor)
         selected = set(kind.split('+')) if isinstance(kind, str) else set()
         if kind == 'both': selected = {'forcesubs', 'payment'}
         if kind == 'all': selected = {'forcesubs', 'payment', 'userbot'}
         if user <= 0 or not selected or not selected <= {'forcesubs', 'payment', 'userbot'}:
             raise ValueError('ID atau jenis izin tidak valid.')
+        if preserve:
+            selected |= {name for name in ('forcesubs','payment','userbot') if self.allowed(user,name)}
         with self.conn:
             self.conn.execute('INSERT INTO creators VALUES (?,1) ON CONFLICT(id) DO UPDATE SET allowed=1', (user,))
             for name in ('forcesubs', 'payment', 'userbot'):

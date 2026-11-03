@@ -19,6 +19,28 @@ function field(id,label,type="text",hint=""){
  el("fields").append(wrap);if(hint)el("fields").append(node("p",hint,"hint"));
 }
 function link(text,url){const a=node("a",text);a.href=url;a.target="_blank";a.rel="noopener noreferrer";return a;}
+async function sharePhone(button){
+ if(busy)return;
+ busy=true;button.disabled=true;
+ for(const id of ["submit","back","cancel"])el(id).disabled=true;
+ el("error").textContent="";
+ try{
+  await request("/api/action",{action:"contact_prepare"});
+  const shared=await new Promise(resolve=>tg.requestContact(resolve));
+  if(!shared){el("error").textContent="Nomor belum dibagikan. Kamu bisa mencoba lagi atau mengetiknya sendiri.";return;}
+  button.textContent="Menghubungkan nomormu…";
+  for(let i=0;i<30;i++){
+   const result=await request("/api/action",{action:"contact_status"});
+   if(result.phone_ready){busy=false;await action({action:"phone_shared"});return;}
+   await new Promise(resolve=>setTimeout(resolve,700));
+  }
+  el("error").textContent="Nomor belum diterima. Coba tombolnya lagi atau masukkan nomor secara manual.";
+ }catch(e){el("error").textContent=e.message;}
+ finally{
+  busy=false;button.disabled=false;button.textContent="📱 Kirim Nomor Telepon";
+  for(const id of ["submit","back","cancel"])el(id).disabled=false;
+ }
+}
 function render(next){state=next;const step=state.step;el("fields").replaceChildren();el("error").textContent="";el("submit").hidden=false;el("cancel").hidden=false;el("back").hidden=["choose","done","cancelled","unavailable"].includes(step);el("submit").textContent="Lanjutkan →";
  const stages=["choose","api","phone","otp","password","summary","done"];const pct=Math.max(15,(stages.indexOf(step)+1)/7*100);el("progress").style.background="linear-gradient(90deg,#c995ff "+pct+"%,#34283f "+pct+"%)";
  const copy={choose:["✨ Siapkan botmu.","Pilih layanan, hubungkan akun, dan mulai dari sini."],api:["🔑 Hubungkan akses API","Masukkan API ID dan API Hash milikmu untuk melanjutkan."],phone:["🔐 Hubungkan akunmu","Gunakan akun Telegram yang sama dengan akun pembuka bot induk."],otp:["✉️ Cek Telegrammu","Masukkan kode login yang dikirim Telegram untuk melanjutkan."],password:["🔐 Satu langkah lagi","Masukkan password verifikasi dua langkah akunmu."],token:["🔗 Hubungkan botmu","Masukkan token dari @BotFather. Kami akan memeriksa identitas bot sebelum melanjutkan."],summary:["✨ Siap diaktifkan?","Periksa identitas layananmu sebelum melanjutkan."],done:["✨ Semuanya siap.","Ruangmu sudah aktif dan siap digunakan 🤍"],cancelled:["🍃 Proses dibatalkan","Belum ada layanan baru yang diaktifkan. Kamu bisa mulai lagi dari bot induk kapan saja."]};
@@ -28,7 +50,15 @@ function render(next){state=next;const step=state.step;el("fields").replaceChild
    if(state.existing)el("fields").append(node("p","✦ Userbotmu sudah terdaftar. Hubungkan ulang untuk memperbarui koneksi; pengaturanmu tetap tersimpan.","hint"));
  }
  if(step==="api"){field("api_id","API ID");field("api_hash","API Hash","password");el("fields").append(link("Ambil API ID & Hash ↗","https://my.telegram.org/auth"));}
- if(step==="phone"){field("phone","Nomor Telegram");el("fields").append(node("p","Dengan melanjutkan, kamu mengizinkan ZΞI menjalankan Userbot dari akunmu. Sesi disimpan terenkripsi di server pengelola. Jangan gunakan server yang tidak kamu percaya.","hint"));}
+ if(step==="phone"){
+  if(tg?.requestContact&&tg.isVersionAtLeast?.("6.9")){
+   const share=node("button","📱 Kirim Nomor Telepon","service");share.type="button";
+   share.onclick=()=>sharePhone(share);el("fields").append(share);
+   el("fields").append(node("p","Bagikan nomor akun yang sedang membuka Mini App. Telegram akan meminta persetujuanmu.","hint"));
+  }
+  field("phone","Nomor Telegram","text","Atau masukkan nomor lengkap dengan kode negara, misalnya +44… atau +62….");
+  el("fields").append(node("p","Dengan melanjutkan, kamu mengizinkan ZΞI menjalankan Userbot dari akunmu. Sesi disimpan terenkripsi di server pengelola. Jangan gunakan server yang tidak kamu percaya.","hint"));
+ }
  if(step==="otp")field("code","Kode Telegram","password");
  if(step==="password")field("password","Password 2FA","password");
  if(step==="token")field("bot_token","Token bot","password");

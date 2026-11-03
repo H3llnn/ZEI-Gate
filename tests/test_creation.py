@@ -97,6 +97,38 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('private-session',await response.text())
         finally: await client.close()
 
+    async def test_shared_phone_is_bound_to_request_and_account(self):
+        await self.action('choose',kind='userbot')
+        await self.action('api',api_id=123,api_hash='a'*32)
+        message={'from':{'id':2},'chat':{'id':2,'type':'private'},
+                 'contact':{'user_id':2,'phone_number':'447700900123'}}
+        self.assertFalse(self.creation.receive_contact(message))
+        await self.action('contact_prepare')
+        wrong={**message,'contact':{'user_id':3,'phone_number':'447700900123'}}
+        self.assertFalse(self.creation.receive_contact(wrong))
+        self.assertFalse(self.creation.receive_contact({**message,'chat':{'id':-1,'type':'group'}}))
+        self.assertTrue(self.creation.receive_contact(message))
+        state=await self.action('contact_status')
+        self.assertTrue(state['phone_ready'])
+        self.assertNotIn('447700900123',json.dumps(state))
+        self.assertEqual((await self.action('phone_shared'))['step'],'otp')
+        self.assertEqual(self.creation.sessions[self.token].shared_phone,'')
+
+    async def test_shared_phone_expires_and_cannot_survive_back(self):
+        await self.action('choose',kind='userbot')
+        await self.action('api',api_id=123,api_hash='a'*32)
+        await self.action('contact_prepare')
+        session=self.creation.sessions[self.token]
+        session.contact_until=time.monotonic()-1
+        message={'from':{'id':2},'chat':{'id':2,'type':'private'},
+                 'contact':{'user_id':2,'phone_number':'447700900123'}}
+        self.assertFalse(self.creation.receive_contact(message))
+        await self.action('contact_prepare')
+        self.assertTrue(self.creation.receive_contact(message))
+        await self.action('back')
+        self.assertEqual(session.shared_phone,'')
+        self.assertEqual(session.contact_until,0)
+
     async def test_signed_identity_rejects_tamper_stale_future_duplicate(self):
         self.assertEqual(telegram_identity(signed(),TOKEN)["id"],2)
         for raw in (signed().replace("Budi","Other"),signed(stamp=1),signed(stamp=int(time.time())+120),signed()+"&auth_date=1"):

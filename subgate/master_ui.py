@@ -14,6 +14,9 @@ class MasterUI(BaseUI):
         self.manager = manager
 
     async def handle(self, update):
+        creation = getattr(self.manager, 'creation', None)
+        if creation and update.get('message', {}).get('contact'):
+            if creation.receive_contact(update['message']): return
         if update.get('inline_query') or (update.get('callback_query', {}).get('data', '').startswith('uh:')):
             from .userbot_help import handle
             return await handle(self, update)
@@ -29,7 +32,6 @@ class MasterUI(BaseUI):
     async def menu(self, user):
         self.clear(user)
         buttons = [[button('＋ Buat / Deploy Bot', 'm:create')], [button('▦ Bot Saya', 'm:mine:0')]]
-        if getattr(self.manager, 'userbots', None): buttons += [[button('✦ Userbot Saya', 'u:mine')]]
         if user == self.db.master_owner:
             buttons += [[button('🔑 Tambah Izin', 'm:grant'), button('🔒 Cabut Izin', 'm:revoke')],
                         [button('👥 Daftar Pengguna', 'm:users:0')], [button('🤖 Semua Bot', 'm:bots:0')]]
@@ -196,13 +198,10 @@ class MasterUI(BaseUI):
     async def grant(self, user, target):
         self.db.master(user)
         self.wait(user,'grant_kind',target=target)
-        await self.text(user,panel('Pilih izin pengguna 🔑',f'ID: {target}\nJenis izin ini menggantikan izin sebelumnya. Bot dari jenis yang dicabut akan berhenti.'),
-            [[button('ForceSubs',f'm:grant_kind:{target}:forcesubs'),button('Payment',f'm:grant_kind:{target}:payment')],
-             [button('Userbot',f'm:grant_kind:{target}:userbot')],
-             [button('ForceSubs + Payment',f'm:grant_kind:{target}:both')],
-             [button('ForceSubs + Userbot',f'm:grant_kind:{target}:forcesubs+userbot')],
-             [button('Payment + Userbot',f'm:grant_kind:{target}:payment+userbot')],
-             [button('Semua Layanan',f'm:grant_kind:{target}:all')],HOME])
+        await self.text(user,panel('Pilih izin pengguna 🔑',f'ID: {target}\nPilih layanan yang ingin diizinkan. Izin layanan lain tetap tersimpan.'),
+            [[button('Userbot',f'm:grant_kind:{target}:userbot')],
+             [button('Payment',f'm:grant_kind:{target}:payment')],
+             [button('ForceSubs',f'm:grant_kind:{target}:forcesubs')],HOME])
 
     async def userbot_detail(self, user, target):
         if user != target: self.db.master(user)
@@ -262,7 +261,8 @@ class MasterUI(BaseUI):
         if data.startswith('m:grant_kind:'):
             state=self.state(user)
             if not state or state['kind']!='grant_kind' or state['target']!=int(parts[2]): raise ValueError('Konfirmasi izin berakhir.')
-            await self.manager.grant(user,int(parts[2]),parts[3])
+            if parts[3] not in ('userbot','payment','forcesubs'): raise ValueError('Pilih satu layanan dari menu izin terbaru.')
+            await self.manager.grant(user,int(parts[2]),parts[3],preserve=True)
             self.clear(user)
             return await self.text(user,panel('Izin diberikan ✅','Jenis izin: '+h(parts[3])),[HOME])
         if data.startswith('m:grant_id:'):
@@ -335,7 +335,7 @@ class MasterUI(BaseUI):
             try: settings.set('prefix',text)
             finally: settings.close()
             self.clear(user)
-            return await self.text(user,panel('✅ Prefix diperbarui',f'Sekarang gunakan <code>{h(text)}help</code> untuk membuka menu.'),[[button('✦ Userbot Saya','u:mine')]])
+            return await self.text(user,panel('✅ Prefix diperbarui',f'Sekarang gunakan <code>{h(text)}help</code> untuk membuka menu.'),[HOME])
         if state['kind'] == 'grant':
             return await self.grant(user, self.positive_id(text))
         if state['kind'] == 'revoke':

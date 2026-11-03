@@ -47,6 +47,8 @@ class Session:
     identity: dict = field(default_factory=dict)
     bot_token: str = ""
     result: dict = field(default_factory=dict)
+    shared_phone: str = ""
+    contact_until: float = 0
 
 
 class Creation:
@@ -99,6 +101,22 @@ class Creation:
                 "kinds": [k for k in KINDS if self.db.allowed(session.owner,k)], "existing": bool(record), "result": session.result,
                 "helper": self.helper}
 
+    def receive_contact(self, message):
+        owner = message.get("from", {}).get("id")
+        chat, contact = message.get("chat", {}), message.get("contact", {})
+        session = self.sessions.get(self.by_owner.get(owner))
+        if (not session or session.kind != "userbot" or session.step != "phone"
+                or chat.get("type") != "private" or chat.get("id") != owner
+                or contact.get("user_id") != owner or not self.db.allowed(owner, "userbot")
+                or time.monotonic() > session.contact_until or time.monotonic()-session.touched > 600):
+            return False
+        phone = contact.get("phone_number", "")
+        if not isinstance(phone, str): return False
+        phone = "+" + phone.removeprefix("+")
+        if not re.fullmatch(r"\+[1-9][0-9]{6,14}", phone): return False
+        session.shared_phone = phone
+        return True
+
     async def auth(self, request):
         data = await request.json()
         user = telegram_identity(data.get("initData"), self.bot_token)
@@ -123,6 +141,7 @@ class Creation:
             await session.login.close(discard=session.step != "done")
             session.login = None
         session.api_hash = session.bot_token = ""
+        session.shared_phone, session.contact_until = "", 0
 
     async def action(self, request):
         bearer = request.headers.get("Authorization", "")
@@ -149,6 +168,7 @@ class Creation:
                 await self.discard(session)
                 return web.json_response({"step": "cancelled", "helper": self.helper})
             if action == "back" and session.step in ("api","phone","token","otp","password","summary"):
+                session.shared_phone, session.contact_until = "", 0
                 if session.login:
                     await session.login.close(discard=True)
                     session.login = None
@@ -166,14 +186,24 @@ class Creation:
                 validate_api(data.get("api_id"), data.get("api_hash"))
                 session.api_id, session.api_hash = data["api_id"], data["api_hash"]
                 session.step = "phone" if session.kind == "userbot" else "token"
-            elif action == "phone" and session.step == "phone":
+            elif action == "contact_prepare" and session.step == "phone" and session.kind == "userbot":
+                session.shared_phone, session.contact_until = "", time.monotonic()+60
+            elif action == "contact_status" and session.step == "phone" and session.kind == "userbot":
+                return web.json_response({**self.view(session), "phone_ready": bool(session.shared_phone) and time.monotonic() <= session.contact_until})
+            elif action in ("phone", "phone_shared") and session.step == "phone":
+                phone = data.get("phone")
+                if action == "phone_shared":
+                    if not session.shared_phone or time.monotonic() > session.contact_until:
+                        raise ValueError("Bagikan nomor melalui tombol Kirim Nomor Telepon terlebih dahulu.")
+                    phone = session.shared_phone
+                session.shared_phone, session.contact_until = "", 0
                 if session.login: await session.login.close(discard=True)
                 if self.login_factory is None:
                     from zei_userbot.login import Login
                     factory = Login
                 else: factory = self.login_factory
                 session.login = factory(session.owner, session.api_id, session.api_hash)
-                async with asyncio.timeout(60): await session.login.begin(data.get("phone"))
+                async with asyncio.timeout(60): await session.login.begin(phone)
                 session.step = "otp"
             elif action in ("otp", "password") and session.step == action:
                 async with asyncio.timeout(60):
