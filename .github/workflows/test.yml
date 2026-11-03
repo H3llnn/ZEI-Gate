@@ -12,11 +12,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: H3llnn/ZEI-Userbot
+          ref: 9846ceef3725caf4d843fa239c435e32752a8cdb
           path: ZEI-Userbot
+      - uses: actions/checkout@v4
+        with:
+          repository: H3llnn/ZEI-ForceSubs
+          ref: 6ca97f60157588570fb4d9d6661cd041f0fd7708
+          path: ZEI-ForceSubs
+      - uses: actions/checkout@v4
+        with:
+          repository: H3llnn/ZEI-Payment
+          ref: c12cb5d2e550319b87df8295befcc5defba88cf6
+          path: ZEI-Payment
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r ZEI-Gate/requirements.txt ./ZEI-Userbot
+      - run: pip install -r ZEI-Gate/requirements.txt ./ZEI-Userbot ./ZEI-ForceSubs ./ZEI-Payment
       - run: python -m unittest discover -s tests -v
         working-directory: ZEI-Gate
       - run: python -m compileall -q subgate tests main.py install.py

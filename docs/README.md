@@ -5,6 +5,7 @@ Satu bot induk untuk mengelola izin, membuat bot ForceSubs dan Payment, serta me
 | Kamu ingin… | Buka panduan |
 | :--- | :--- |
 | Memasang untuk pertama kali | [Mulai dari README](../README.md#jalankan-di-laptop) |
+| Memasang empat repo runtime | [Struktur runtime](RUNTIME-SPLIT.md) |
 | Memahami bot induk, bot anak, dan Mini App | [Pertanyaan umum](FAQ.md) |
 | Memperbarui instalasi tanpa kehilangan data | [Update dan cadangan](UPDATE-GUIDE.md) |
 | Mengatur izin, bantuan tombol, dan akses gabungan | [Pembaruan 3 November 2026](UPDATE-2026-11-03.md) |

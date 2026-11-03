@@ -26,6 +26,8 @@ ForceSubs · Payment · Userbot
 | **💳 Payment** | Jual akses channel/grup melalui QRIS, verifikasi pembayaran, dan kirim link akses. |
 | **⚡ Userbot** | Hubungkan akun pribadi, atur prefix, dan gunakan 38 perintah dari akun sendiri. |
 
+**Empat repo, satu bot induk:** [Gate](https://github.com/H3llnn/ZEI-Gate) · [ForceSubs](https://github.com/H3llnn/ZEI-ForceSubs) · [Payment](https://github.com/H3llnn/ZEI-Payment) · [Userbot](https://github.com/H3llnn/ZEI-Userbot). [Struktur runtime](docs/RUNTIME-SPLIT.md).
+
 Panduan terbaru: [menu izin, bantuan per perintah, dan paket gabungan](docs/UPDATE-2026-11-03.md).
 
 ## Kendali yang jelas, alur yang rapi
@@ -37,7 +39,7 @@ Panduan terbaru: [menu izin, bantuan per perintah, dan paket gabungan](docs/UPDA
 | **🔐 Sesi terenkripsi** | OTP dan password 2FA tidak disimpan di database; formulir sementara memiliki batas waktu. |
 | **🔄 Koneksi ulang terjaga** | Proses lama dipertahankan sampai pengganti terverifikasi dan siap. |
 
-> **Pemeriksaan terakhir · 3 November 2026:** 153 tes Gate lulus; 5 tes Userbot lulus pada pemeriksaan sebelumnya. Uji pembayaran, bergabung, dan tombol bantuan pada versi terbaru tetap perlu dilakukan langsung. [Hasil dan batas pemeriksaan](docs/STATUS.md).
+> **Pemeriksaan terakhir · 3 November 2026:** 155 tes Gate dan 5 tes Userbot lulus, termasuk dengan runtime terpasang sebagai paket. Uji pembayaran, bergabung, dan tombol bantuan pada versi terbaru tetap perlu dilakukan langsung. [Hasil dan batas pemeriksaan](docs/STATUS.md).
 
 
 ## Dari izin sampai layananmu aktif
@@ -71,11 +73,13 @@ flowchart LR
 
 ## Jalankan di laptop
 
-Letakkan dua folder berdampingan:
+Letakkan empat folder berdampingan:
 
 ```text
 ZEI-Project/
   ZEI-Gate/
+  ZEI-ForceSubs/
+  ZEI-Payment/
   ZEI-Userbot/
 ```
 
@@ -106,7 +110,7 @@ Bot induk menampilkan tombol Buka Ruang Pembuatan ketika alamat tersebut diaktif
 
 ## Docker / VPS
 
-Jalankan docker compose up -d --build di folder ZEI-Gate. Image memasang runtime Userbot dari commit yang dipin; build context hanya folder Gate. Port host hanya terikat localhost. Pasang HTTPS reverse proxy di depan port 8081. Pada pembaruan Docker, pertahankan nama proyek Compose lama dengan opsi -p agar volume subgate-data lama tetap digunakan; jangan menjalankan down -v. Cadangkan volume data dan SECRET_KEY bersama-sama; kehilangan kunci membuat sesi lama tidak dapat dibaca.
+Jalankan docker compose up -d --build di folder ZEI-Gate. Image memasang runtime ForceSubs, Payment, dan Userbot dari commit yang dipin; build context hanya folder Gate. Port host hanya terikat localhost. Pasang HTTPS reverse proxy di depan port 8081. Pada pembaruan Docker, pertahankan nama proyek Compose lama dengan opsi -p agar volume subgate-data lama tetap digunakan; jangan menjalankan down -v. Cadangkan volume data dan SECRET_KEY bersama-sama; kehilangan kunci membuat sesi lama tidak dapat dibaca.
 
 Proses Userbot terpisah per akun, tanpa shell/eval dan tanpa modul pihak ketiga yang dimuat otomatis. Pemisahan proses bukan sandbox OS; pengelola server tetap memiliki akses ke penyimpanan. Jalankan hanya di server yang kamu percaya.
 
