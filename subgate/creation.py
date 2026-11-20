@@ -69,6 +69,9 @@ class Creation:
         self.app.router.add_get("/style.css", self.style)
         self.app.router.add_post("/api/auth", self.auth)
         self.app.router.add_post("/api/action", self.action)
+        if getattr(manager, 'servers', None):
+            from .server_api import routes
+            routes(self.app, manager.servers)
 
     @web.middleware
     async def errors(self, request, handler):

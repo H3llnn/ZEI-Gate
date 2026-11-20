@@ -77,6 +77,8 @@ async def main():
         try:
             me = await api.call('getMe')
             manager = Manager(db, me['id'])
+            from .servers import Servers
+            manager.servers = Servers(db)
             from .payment_webhook import PaymentWebhook
             webhook=PaymentWebhook(db,manager,os.environ.get('PAYMENT_PUBLIC_BASE','') if os.environ.get('PAYMENT_ENABLE_WEBHOOK')=='1' else '',
                 os.environ.get('PAYMENT_BIND','127.0.0.1'),int(os.environ.get('PAYMENT_PORT','8080')))

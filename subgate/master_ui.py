@@ -6,12 +6,13 @@ import time
 from .ui_base import BaseUI, command
 from .copy import h, panel, button, link_button, nav
 from .service import inline, TelegramFailure
+from .server_ui import ServerUI
 
 HOME = [button('⌂ Menu Utama', 'm:menu')]
 API_BUTTON = link_button('🔑 Ambil API ID & Hash', 'https://my.telegram.org/auth')
 
 
-class MasterUI(BaseUI):
+class MasterUI(ServerUI, BaseUI):
     def __init__(self, db, api, manager):
         super().__init__(db, api)
         self.manager = manager
@@ -39,6 +40,8 @@ class MasterUI(BaseUI):
         if user == self.db.master_owner:
             buttons += [[button('🔑 Tambah Izin', 'm:grant'), button('🔒 Cabut Izin', 'm:revoke')],
                         [button('👥 Daftar Pengguna', 'm:users:0')], [button('🤖 Semua Bot', 'm:bots:0')]]
+            if getattr(self.manager,'servers',None):
+                buttons.append([button('🖥️ Kelola Server','srv:list:0')])
         await self.text(user, panel('ZΞI Gate', '<i>Ruang kendali bot pribadimu.</i>\n\n'
             f'Hai, {h(self.names.get(user, "teman"))} 👋\n'
             'Semua botmu, satu tempat. Buat bot baru atau kelola yang sudah aktif lewat menu di bawah.\n\n'
@@ -80,7 +83,7 @@ class MasterUI(BaseUI):
         await self.text(user, text, buttons)
 
     async def refresh_name(self, row):
-        if row['id'] in self.manager.running or not row.get('name'):
+        if self.manager.is_running(row['id']) or not row.get('name'):
             try:
                 name = await self.manager.lookup_name(row['id'])
                 if name:
@@ -100,14 +103,14 @@ class MasterUI(BaseUI):
         if not rows:
             return await self.text(user, panel('Ruangmu masih kosong ✨',
                 'Belum ada bot di sini.\nYuk, mulai dengan bot pertamamu.'), [[button('＋ Buat Bot', 'm:create')], HOME])
-        active = sum(row['id'] in self.manager.running for row in rows)
+        active = sum(self.manager.is_running(row['id']) for row in rows)
         title = 'Pusat kendali bot 🤖' if all_bots else 'Koleksi botmu 🤖'
         body = (f'<b>Total:</b> {len(rows)}\n<b>🟢 Berjalan:</b> {active}\n<b>⚫ Berhenti:</b> {len(rows)-active}'
                 if all_bots else f'Kamu punya <b>{len(rows)} bot</b>.')
         buttons = []
         for row in rows[page*8:(page+1)*8]:
             name = await self.refresh_name(row)
-            status = '🟢' if row['id'] in self.manager.running else '⚫'
+            status = '🟢' if self.manager.is_running(row['id']) else '⚫'
             buttons.append([button(f'{status} {name}', f'm:detail:{row["id"]}:{prefix}:{page}')])
         nav_buttons = []
         if page:
@@ -129,7 +132,7 @@ class MasterUI(BaseUI):
                 raise PermissionError('Bot bukan milik pengguna ini.')
         self.clear(user)
         name = await self.refresh_name(row)
-        active = bot in self.manager.running
+        active = self.manager.is_running(bot)
         status = '🟢 Aktif' if active else '⚫ Berhenti'
         back = f'm:{context}:{page}'
         buttons = []
@@ -172,13 +175,19 @@ class MasterUI(BaseUI):
         self.db.master(user)
         self.clear(user)
         allowed = self.db.allowed(target)
+        service = getattr(self.manager,'servers',None)
+        server = service.assigned(target) if service else None
+        placement = service.get(server)['name'] if server is not None else 'Server Utama'
         buttons = [[button('🔒 Cabut Akses' if allowed else '🔑 Beri Akses',
                           f'm:revoke_ask:{target}' if allowed else f'm:grant_id:{target}')],
                    [button('Ubah Jenis Izin',f'm:permissions:{target}')],
                    [button('🤖 Bot Pengguna', f'm:owned:{target}:0')],
                    [button('✦ Userbot Pengguna', f'u:owner:{target}')],
                    [button('‹ Daftar Pengguna', 'm:users:0')], HOME]
+        if service:
+            buttons.insert(2,[button('🖥️ Server',f'srv:choose:{target}:0')])
         await self.text(user, panel('Detail akses pengguna 👤',
+            f'<b>Nama:</b> {h(await self.user_name(target))}\n<b>Server bot:</b> {h(placement)}\n'
             f'<b>ID:</b> {target}\n<b>Akses:</b> {"🟢 Diizinkan" if allowed else "🔒 Dicabut"}\n'
             f'<b>Jenis izin:</b> {h(", ".join(k for k in ("forcesubs","payment","userbot") if self.db.allowed(target,k)) or "Tidak ada")}\n<b>Jumlah bot:</b> {len(self.db.bots(target))}'), buttons)
 
@@ -245,6 +254,8 @@ class MasterUI(BaseUI):
         return await self.text(user,panel('✦ ZΞI Userbot',body),buttons+[HOME])
 
     async def callback(self, user, data, message):
+        if data.startswith('srv:'):
+            return await self.server_callback(user,data)
         if data == 'u:prefix': return await self.prefix_prompt(user)
         if data == 'u:mine': return await self.userbot_detail(user,user)
         if data.startswith('u:owner:'): return await self.userbot_detail(user,int(data.split(':')[2]))
@@ -367,6 +378,11 @@ class MasterUI(BaseUI):
         if not state:
             return await self.menu(user)
         text = message.get('text', '').strip()
+        if state['kind']=='server_name':
+            service=self.servers_service(user)
+            server,code=service.add(user,text)
+            self.clear(user)
+            return await self.server_code(user,server,code)
         if state['kind'] == 'userbot_prefix':
             if not self.db.allowed(user,'userbot'): raise PermissionError('Izinmu sudah dicabut.')
             from zei_userbot.state import State

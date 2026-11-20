@@ -15,10 +15,13 @@ class API:
         if not TOKEN.fullmatch(token):
             raise ValueError('Format token bot tidak valid.')
         self.token = token
+        self.lease_check = lambda: True
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=70))
 
     async def call(self, method, **params):
         for attempt in range(3):
+            if not self.lease_check():
+                raise TelegramFailure(503, 'Izin koneksi server perlu diperbarui.')
             try:
                 async with self.session.post(
                     f'https://api.telegram.org/bot{self.token}/{method}', json=params
@@ -38,6 +41,8 @@ class API:
             raise TelegramFailure(code, description, retry)
 
     async def send_photo_bytes(self,chat,data,caption,markup):
+        if not self.lease_check():
+            raise TelegramFailure(503, 'Izin koneksi server perlu diperbarui.')
         import json
         form=aiohttp.FormData()
         form.add_field('chat_id',str(chat))

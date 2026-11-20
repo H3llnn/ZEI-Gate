@@ -21,6 +21,14 @@ class Manager:
         self.payment_base = ""
         self.userbots = None
         self.creation = None
+        self.servers = None
+        self.call_allowed = lambda: True
+
+    def remote_server(self, owner):
+        return self.servers.assigned(owner) if self.servers else None
+
+    def is_running(self, bot):
+        return bot in self.running or bool(self.servers and self.servers.running(bot))
 
     def make_runner(self, record, credentials):
         from .telegram import API, Poller
@@ -49,6 +57,16 @@ class Manager:
         if bot in self.running:
             return
         record = self.db.bot(bot)
+        server = self.remote_server(record['owner'])
+        if server is not None:
+            if not self.servers.online(self.servers.get(server)):
+                raise ValueError('Server pengguna belum terhubung.')
+            deadline = asyncio.get_running_loop().time()+25
+            while asyncio.get_running_loop().time() < deadline:
+                if self.servers.running(bot):
+                    return
+                await asyncio.sleep(0.25)
+            raise ValueError('Server belum mengonfirmasi bot aktif. Periksa koneksi server.')
         runner = self.runner_factory(record, self.db.credentials(bot))
         try:
             if hasattr(runner, 'start'):
@@ -68,6 +86,9 @@ class Manager:
         async with self.lock:
             if not self.db.allowed(owner,kind):
                 raise PermissionError('Izin kamu sudah dicabut.')
+            server = self.remote_server(owner)
+            if server is not None and not self.servers.online(self.servers.get(server)):
+                raise ValueError('Server pengguna belum terhubung. Coba lagi setelah server aktif.')
             existing = self.db.rows('SELECT owner,kind FROM bots WHERE id=?', (bot,))
             if existing and existing[0]['owner'] != owner:
                 raise PermissionError('Bot sudah terdaftar milik pengguna lain.')
@@ -119,6 +140,8 @@ class Manager:
         async with self.lock:
             if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots():
+                if self.remote_server(record['owner']) is not None:
+                    continue
                 if record['active'] and self.db.allowed(record['owner'],record['kind']):
                     try:
                         await self._start(record['id'])
@@ -132,6 +155,8 @@ class Manager:
             if tick % 6 == 0:
                 await self.restore()
             for record in self.db.bots():
+                if self.remote_server(record['owner']) is not None:
+                    continue
                 api = None
                 temporary = False
                 try:
@@ -148,6 +173,8 @@ class Manager:
                             if PaymentStore(self.db).qr_due(record['id']):
                                 api=API(self.db.credentials(record['id'])['token']); temporary=True
                         if api is None: continue
+                    if temporary:
+                        api.lease_check = self.call_allowed
                     if record['kind']=='payment':
                         if self.db.settings(record['id']).get('legacy_forcesubs'):
                             await Delivery(self.db,record['id'],api).expire()
