@@ -246,10 +246,7 @@ class Creation:
             return web.json_response(self.view(session))
 
     def prefix(self, owner):
-        from zei_userbot.state import State
-        state = State(self.manager.userbots.directory / str(owner) / "settings.sqlite")
-        try: return state.prefix
-        finally: state.close()
+        return self.manager.userbots.prefix(owner)
 
     async def sweep(self):
         while True:

@@ -79,12 +79,14 @@ async def main():
             manager = Manager(db, me['id'])
             from .servers import Servers
             manager.servers = Servers(db)
+            manager.servers.helper = me['username']
             from .payment_webhook import PaymentWebhook
             webhook=PaymentWebhook(db,manager,os.environ.get('PAYMENT_PUBLIC_BASE','') if os.environ.get('PAYMENT_ENABLE_WEBHOOK')=='1' else '',
                 os.environ.get('PAYMENT_BIND','127.0.0.1'),int(os.environ.get('PAYMENT_PORT','8080')))
             await webhook.start()
             from .userbots import Userbots
             manager.userbots = Userbots(db, config.data / 'userbots', me['username'])
+            manager.userbots.servers = manager.servers
             if os.environ.get('CREATION_ENABLE') == '1':
                 from .creation import Creation
                 creation = Creation(db,manager,config.token,os.environ.get('CREATION_PUBLIC_BASE',''),me['username'],

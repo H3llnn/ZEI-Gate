@@ -15,6 +15,7 @@ from .app import instance_lock
 from .runtime import Manager
 from .servers import LEASE_SECONDS
 from .store import Store
+from .userbots import Userbots
 
 log = logging.getLogger(__name__)
 
@@ -35,14 +36,17 @@ def save_identity(path, data):
 
 
 class Worker:
-    def __init__(self, db, manager=None):
+    def __init__(self, db, manager=None, directory=None):
         self.db = db
         self.manager = manager or Manager(db, 0)
         self.deadline = 0
         self.lock = asyncio.Lock()
         self.manager.call_allowed = lambda: time.monotonic() < self.deadline
         db.conn.execute('CREATE TABLE IF NOT EXISTS worker_versions (bot INTEGER PRIMARY KEY, revision TEXT NOT NULL)')
+        db.conn.execute('CREATE TABLE IF NOT EXISTS worker_accounts (owner INTEGER PRIMARY KEY, revision TEXT NOT NULL, prefix_version INTEGER NOT NULL DEFAULT 0)')
         db.conn.commit()
+        if self.manager.userbots is None:
+            self.manager.userbots = Userbots(db, directory or Path(db.conn.execute('PRAGMA database_list').fetchone()[2]).parent/'userbots')
         original = self.manager.runner_factory
 
         def factory(record, credentials):
@@ -57,10 +61,62 @@ class Worker:
         # Never restore from the worker's previous lease after a process restart.
         with db.conn:
             db.conn.execute('UPDATE bots SET active=0')
+            db.conn.execute('UPDATE userbots SET active=0')
 
     def report(self):
-        return {str(row['bot']): {'revision': row['revision'], 'running': row['bot'] in self.manager.running}
-                for row in self.db.rows('SELECT * FROM worker_versions')}
+        report = {str(row['bot']): {'revision': row['revision'], 'running': row['bot'] in self.manager.running}
+                  for row in self.db.rows('SELECT * FROM worker_versions')}
+        service = self.manager.userbots
+        for row in self.db.rows('SELECT * FROM worker_accounts'):
+            runner = service.running.get(row['owner'])
+            running = runner is not None and (not hasattr(runner,'process') or runner.process.returncode is None)
+            report['u:'+str(row['owner'])] = dict(revision=row['revision'],running=running,
+                prefix=service.prefix(row['owner']),prefix_version=row['prefix_version'])
+        return report
+
+    async def apply_accounts(self, snapshot):
+        service = self.manager.userbots
+        service.helper = snapshot.get('helper','')
+        wanted = {item['owner']:item for item in snapshot.get('userbots',[])}
+        for record in self.db.rows('SELECT * FROM userbots'):
+            if record['owner'] not in wanted:
+                with self.db.conn:
+                    self.db.conn.execute('UPDATE userbots SET active=0 WHERE owner=?',(record['owner'],))
+                runner = service.running.pop(record['owner'],None)
+                if runner:
+                    await runner.stop()
+        for owner,item in wanted.items():
+            if type(owner) is not int or owner <= 0:
+                raise ValueError('Identitas Userbot tidak valid.')
+            allowed = bool(item['allowed'])
+            active = bool(allowed and item['active'] and not item['redeploy_required'])
+            with self.db.conn:
+                self.db.conn.execute('INSERT INTO creators VALUES (?,1) ON CONFLICT(id) DO NOTHING',(owner,))
+                self.db.conn.execute("INSERT INTO creator_permissions VALUES (?,'userbot',?) ON CONFLICT(user,kind) DO UPDATE SET allowed=excluded.allowed",(owner,allowed))
+            versions = self.db.rows('SELECT * FROM worker_accounts WHERE owner=?',(owner,))
+            changed = not versions or versions[0]['revision'] != item['revision']
+            if changed and active:
+                try:
+                    await service.deploy(owner,item['credentials'],{'id':owner,'name':item['name']})
+                except Exception as exc:
+                    log.warning('Userbot %s belum aktif: %s',owner,type(exc).__name__)
+                    continue
+                with self.db.conn:
+                    self.db.conn.execute('INSERT INTO worker_accounts(owner,revision) VALUES (?,?) ON CONFLICT(owner) DO UPDATE SET revision=excluded.revision',(owner,item['revision']))
+            elif service.record(owner):
+                with self.db.conn:
+                    self.db.conn.execute('UPDATE userbots SET active=?,redeploy_required=? WHERE owner=?',(active,bool(item['redeploy_required']),owner))
+            if not active:
+                runner = service.running.pop(owner,None)
+                if runner:
+                    await runner.stop()
+            control = item.get('control')
+            version = versions[0]['prefix_version'] if versions else 0
+            if control and active and control['version'] > version and service.record(owner):
+                await service.set_prefix(owner,control['prefix'])
+                with self.db.conn:
+                    self.db.conn.execute('UPDATE worker_accounts SET prefix_version=? WHERE owner=?',(control['version'],owner))
+        await service.reconcile()
 
     async def apply(self, snapshot, started):
         if (snapshot.get('master_owner') != self.db.master_owner or snapshot.get('lease_seconds') != LEASE_SECONDS
@@ -118,6 +174,7 @@ class Worker:
                             await self.manager._start(item['id'])
                         except Exception as exc:
                             log.warning('Bot %s belum aktif: %s',item['id'],type(exc).__name__)
+                await self.apply_accounts(snapshot)
 
     async def expire(self):
         async with self.lock, self.manager.lock:
@@ -125,8 +182,10 @@ class Worker:
                 return
             with self.db.conn:
                 self.db.conn.execute('UPDATE bots SET active=0')
+                self.db.conn.execute('UPDATE userbots SET active=0')
             for bot in list(self.manager.running):
                 await self.manager.running.pop(bot).stop()
+            await self.manager.userbots.close()
 
     async def watch(self):
         while True:

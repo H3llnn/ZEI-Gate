@@ -22,7 +22,10 @@ class Servers:
                 last_seen REAL NOT NULL DEFAULT 0, report TEXT NOT NULL DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS server_owners (
                 owner INTEGER PRIMARY KEY, server INTEGER NOT NULL REFERENCES servers(id));
+            CREATE TABLE IF NOT EXISTS server_prefixes (
+                owner INTEGER PRIMARY KEY, prefix TEXT NOT NULL, version INTEGER NOT NULL);
         ''')
+        self.helper = ''
 
     def all(self):
         return self.db.rows('SELECT id,name,enabled,last_seen FROM servers ORDER BY id')
@@ -88,8 +91,8 @@ class Servers:
             raise ValueError('Pengguna tidak valid.')
         if self.assigned(owner) == server:
             return
-        if self.db.bots(owner):
-            raise ValueError('Pengguna sudah memiliki bot. Pemindahan server memerlukan migrasi data terlebih dahulu.')
+        if self.db.bots(owner) or self.db.rows('SELECT owner FROM userbots WHERE owner=?',(owner,)):
+            raise ValueError('Pengguna sudah memiliki bot atau Userbot. Pemindahan server memerlukan migrasi data terlebih dahulu.')
         if server is not None:
             row = self.get(server)
             if not row['enabled'] or not row['token_hash'] or not self.online(row):
@@ -124,10 +127,62 @@ class Servers:
             actual = report.get(str(item['id']), {})
             if isinstance(actual, dict) and actual.get('revision') == item['revision']:
                 valid[str(item['id'])] = {'revision': item['revision'], 'running': actual.get('running') is True}
+        accounts = []
+        for record in self.db.rows('SELECT * FROM userbots'):
+            owner = record['owner']
+            if self.assigned(owner) != row['id']:
+                continue
+            control = self.db.rows('SELECT prefix,version FROM server_prefixes WHERE owner=?',(owner,))
+            item = dict(owner=owner,name=record['name'],revision=self.revision(record),
+                active=bool(record['active'] and not record['redeploy_required'] and self.db.allowed(owner,'userbot')),
+                allowed=self.db.allowed(owner,'userbot'),redeploy_required=bool(record['redeploy_required']),
+                credentials=json.loads(self.db.cipher.decrypt(record['credentials'])),
+                control=control[0] if control else None)
+            accounts.append(item)
+            actual = report.get('u:'+str(owner),{})
+            if isinstance(actual,dict) and actual.get('revision') == item['revision']:
+                from zei_userbot.state import validate_prefix
+                try:
+                    prefix = validate_prefix(actual.get('prefix'))
+                except ValueError:
+                    continue
+                version = actual.get('prefix_version',0)
+                if type(version) is not int or version < 0:
+                    continue
+                valid['u:'+str(owner)] = dict(revision=item['revision'],running=actual.get('running') is True,
+                                             prefix=prefix,prefix_version=version)
         with self.db.conn:
             self.db.conn.execute("UPDATE servers SET last_seen=?,report=?,code_hash=NULL WHERE id=?",
                                  (time.time(), json.dumps(valid), row['id']))
-        return {'master_owner': self.db.master_owner, 'lease_seconds': LEASE_SECONDS, 'bots': desired}
+        return {'master_owner': self.db.master_owner, 'lease_seconds': LEASE_SECONDS, 'bots': desired,
+                'userbots': accounts, 'helper': self.helper}
+
+    def account_report(self, owner):
+        server = self.assigned(owner)
+        if server is None:
+            return {}
+        row = self.get(server)
+        if not self.online(row):
+            return {}
+        accounts = self.db.rows('SELECT * FROM userbots WHERE owner=?',(owner,))
+        report = json.loads(row['report']).get('u:'+str(owner),{})
+        if not accounts or report.get('revision') != self.revision(accounts[0]):
+            return {}
+        return report
+
+    def account_running(self, owner):
+        rows = self.db.rows('SELECT active,redeploy_required FROM userbots WHERE owner=?',(owner,))
+        return bool(rows and rows[0]['active'] and not rows[0]['redeploy_required']
+                    and self.db.allowed(owner,'userbot') and self.account_report(owner).get('running'))
+
+    def set_prefix(self, owner, prefix):
+        from zei_userbot.state import validate_prefix
+        validate_prefix(prefix)
+        if not self.account_running(owner):
+            raise ValueError('Userbot belum aktif di server klien.')
+        with self.db.conn:
+            self.db.conn.execute('INSERT INTO server_prefixes VALUES (?,?,1) ON CONFLICT(owner) DO UPDATE SET prefix=excluded.prefix,version=version+1',(owner,prefix))
+        return self.db.rows('SELECT version FROM server_prefixes WHERE owner=?',(owner,))[0]['version']
 
     def running(self, bot):
         record = self.db.bot(bot)

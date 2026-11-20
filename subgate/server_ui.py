@@ -34,13 +34,15 @@ class ServerUI:
         row = service.get(server)
         rows = [r for r in self.db.bots() if service.assigned(r['owner']) == server]
         active = sum(service.running(r['id']) for r in rows)
+        accounts = [r for r in self.db.rows('SELECT owner FROM userbots') if service.assigned(r['owner']) == server]
+        account_active = sum(service.account_running(r['owner']) for r in accounts)
         buttons = [[button('↻ Perbarui',f'srv:detail:{server}')]]
         if not row['token_hash']:
             buttons.append([button('🔑 Buat Kode Baru',f'srv:code:{server}')])
         buttons.append([button('‹ Kelola Server','srv:list:0')])
         await self.text(user,panel('Server milikmu 🖥️',f'<b>Nama:</b> {h(row["name"])}\n'
             f'<b>Koneksi:</b> {"🟢 Terhubung" if service.online(row) else "⚫ Belum terhubung"}\n'
-            f'<b>Bot aktif:</b> {active} / {len(rows)}\n\nPilih server untuk klien melalui Daftar Pengguna → Server.'),buttons)
+            f'<b>Bot aktif:</b> {active} / {len(rows)}\n<b>Userbot aktif:</b> {account_active} / {len(accounts)}\n\nPilih server untuk klien melalui Daftar Pengguna → Server.'),buttons)
 
     async def server_code(self, user, server, code):
         service = self.servers_service(user)
@@ -71,8 +73,8 @@ class ServerUI:
             buttons.append(pages)
         buttons.append([button('‹ Detail Pengguna',f'm:user:{target}')])
         await self.text(user,panel('Pilih Server 🖥️',f'<b>Pengguna:</b> {h(await self.user_name(target))}\n\n'
-            'Bot ForceSubs dan Payment baru akan dijalankan pada server pilihanmu. Userbot memakai server utama.\n'
-            'Pengguna yang sudah memiliki bot perlu migrasi data sebelum pindah server.'),buttons)
+            'ForceSubs, Payment, dan Userbot baru akan dijalankan pada server pilihanmu.\n'
+            'Pengguna yang sudah memiliki bot atau Userbot perlu migrasi data sebelum pindah server.'),buttons)
 
     async def server_callback(self, user, data):
         service = self.servers_service(user)

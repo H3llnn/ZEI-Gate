@@ -247,7 +247,7 @@ class MasterUI(ServerUI, BaseUI):
         record = service.record(target) if service else None
         if not record:
             return await self.text(user,panel('✦ Ruangmu masih kosong', 'Belum ada Userbot terhubung.'),[[button('✨ Buat Userbot','m:create')],HOME])
-        active = target in service.running
+        active = service.is_running(target)
         body = f'<b>Akun:</b> {h(record["name"])}\n<b>Status:</b> {"🟢 Aktif" if active else "⚫ Berhenti"}'
         if record['redeploy_required']: body += '\nHubungkan ulang setelah izinmu dipulihkan.'
         buttons = [[button('🔗 Hubungkan Ulang','m:create')],[button('⚙️ Pengaturan Prefix','u:prefix')]] if user == target else []
@@ -385,12 +385,9 @@ class MasterUI(ServerUI, BaseUI):
             return await self.server_code(user,server,code)
         if state['kind'] == 'userbot_prefix':
             if not self.db.allowed(user,'userbot'): raise PermissionError('Izinmu sudah dicabut.')
-            from zei_userbot.state import State
             service = self.manager.userbots
             if not service.record(user): raise PermissionError('Userbot belum terhubung.')
-            settings = State(service.directory / str(user) / 'settings.sqlite')
-            try: settings.set('prefix',text)
-            finally: settings.close()
+            await service.set_prefix(user,text)
             self.clear(user)
             return await self.text(user,panel('✅ Prefix diperbarui',f'Sekarang gunakan <code>{h(text)}help</code> untuk membuka menu.'),[HOME])
         if state['kind'] == 'grant':

@@ -53,19 +53,26 @@ def screen(owner, prefix, category=None, helper="", command=None):
     return text, inline(buttons)
 
 
+def current_prefix(service, owner):
+    if getattr(service,'servers',None) is not None:
+        return service.prefix(owner)
+    state = State(service.directory / str(owner) / 'settings.sqlite')
+    try: return state.prefix
+    finally: state.close()
+
+
 async def handle(ui, update):
     query = update.get("inline_query")
     callback = update.get("callback_query")
     item = query or callback
     owner = item["from"]["id"]
     service = getattr(ui.manager, "userbots", None)
-    allowed = bool(service and owner in service.running and ui.db.allowed(owner,"userbot"))
+    running = service.is_running(owner) if service and getattr(service,'servers',None) is not None else bool(service and owner in service.running)
+    allowed = bool(running and ui.db.allowed(owner,"userbot"))
     if query:
         results = []
         if allowed and query.get("query") == "zei-help":
-            state = State(service.directory / str(owner) / "settings.sqlite")
-            try: text, buttons = screen(owner,state.prefix,helper=service.helper)
-            finally: state.close()
+            text, buttons = screen(owner,current_prefix(service,owner),helper=service.helper)
             results = [{"type":"article", "id":"zei-help", "title":"✦ ZΞI Userbot", "input_message_content":{"message_text":text,"parse_mode":"HTML"},"reply_markup":buttons}]
         await ui.api.call("answerInlineQuery",inline_query_id=query["id"],results=results,cache_time=0,is_personal=True)
         return
@@ -75,8 +82,6 @@ async def handle(ui, update):
         await ui.api.call("answerCallbackQuery",callback_query_id=callback["id"],text="Menu ini hanya untuk pemilik akun yang masih memiliki izin.",show_alert=True)
         return
     await ui.api.call("answerCallbackQuery",callback_query_id=callback["id"])
-    state = State(service.directory / str(owner) / "settings.sqlite")
-    try: text, buttons = screen(owner,state.prefix,parts[2],service.helper,parts[3] if len(parts) == 4 else None)
-    finally: state.close()
+    text, buttons = screen(owner,current_prefix(service,owner),parts[2],service.helper,parts[3] if len(parts) == 4 else None)
     if callback.get("inline_message_id"):
         await ui.api.call("editMessageText",inline_message_id=callback["inline_message_id"],text=text,parse_mode="HTML",reply_markup=buttons)
