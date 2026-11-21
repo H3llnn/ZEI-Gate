@@ -192,6 +192,14 @@ class Store:
         if self.bot(bot)['owner'] != actor:
             raise PermissionError('Hanya pemilik bot yang boleh mengubah pengaturan.')
 
+    def can_manage(self, bot, actor):
+        record = self.bot(bot)
+        return record['owner'] == actor or (record['kind'] == 'forcesubs' and actor in self.admins(bot))
+
+    def manage(self, bot, actor):
+        if not self.can_manage(bot, actor):
+            raise PermissionError('Hanya pemilik dan admin bot yang boleh mengubah pengaturan.')
+
     def deploy(self, actor, bot, username, api_id, api_hash, token, session, name=None, kind='forcesubs'):
         if kind not in ('forcesubs','payment'): raise ValueError('Akun Userbot memakai proses pembuatan akun tersendiri.')
         if not self.allowed(actor, kind):
@@ -234,7 +242,7 @@ class Store:
             from .payment_store import PaymentStore
             PaymentStore(self).staff(bot,actor)
         else:
-            self.owner(bot, actor)
+            self.manage(bot, actor)
         if name not in DEFAULTS:
             raise ValueError('Pengaturan tidak dikenal.')
         if name == 'database' and (not isinstance(value, int) or value >= 0):
@@ -262,7 +270,7 @@ class Store:
         return [r['user'] for r in self.rows('SELECT user FROM admins WHERE bot=? ORDER BY user', (bot,))]
 
     def admin(self, bot, actor, user, add):
-        self.owner(bot, actor)
+        self.manage(bot, actor)
         if user <= 0:
             raise ValueError('ID pengguna harus positif.')
         with self.conn:
@@ -278,7 +286,7 @@ class Store:
         return self.rows('SELECT * FROM targets WHERE bot=? ORDER BY rowid', (bot,))
 
     def target(self, bot, actor, chat, kind, url, title=''):
-        self.owner(bot, actor)
+        self.manage(bot, actor)
         targets = self.targets(bot)
         if chat not in [r['chat'] for r in targets] and len(targets) >= 4:
             raise ValueError('Maksimal 4 channel/grup ForceSubs.')
@@ -290,7 +298,7 @@ class Store:
                 (bot, chat, kind, url, title))
 
     def remove_target(self, bot, actor, chat):
-        self.owner(bot, actor)
+        self.manage(bot, actor)
         with self.conn:
             self.conn.execute('DELETE FROM targets WHERE bot=? AND chat=?', (bot, chat))
             self.conn.execute('DELETE FROM incidents WHERE bot=? AND scope=?', (bot, f'chat:{chat}'))
