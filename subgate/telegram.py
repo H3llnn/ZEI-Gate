@@ -118,7 +118,7 @@ class Poller:
         while True:
             try:
                 updates = await self.api.call('getUpdates', offset=offset, timeout=50,
-                    allowed_updates=['message', 'callback_query', 'chat_member', 'inline_query'])
+                    allowed_updates=['message', 'callback_query', 'chat_member', 'inline_query', 'channel_post', 'edited_channel_post'])
                 for update in updates:
                     await self.slots.acquire()
                     task = asyncio.create_task(self.dispatch(update))
