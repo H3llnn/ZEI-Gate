@@ -49,10 +49,13 @@ class ServerUI:
         creation = getattr(self.manager,'creation',None)
         origin = creation.public_base if creation else ''
         await self.text(user,panel('Hubungkan servermu 🔑',f'<b>{h(service.get(server)["name"])}</b>\n\n'
-            'Salin konfigurasi berikut ke <code>config.env</code> server klien, lalu jalankan paket ZΞI Worker.\n\n'
+            'Unduh pemasang melalui tombol di bawah, lalu unggah <code>install_worker.py</code> ke server Python 3.12 atau lebih baru.\n'
+            'Simpan konfigurasi berikut sebagai <code>config.env</code>, atur file startup ke <code>install_worker.py</code>, lalu tekan Start.\n\n'
             f'<pre>ZEI_MODE=worker\nWORKER_GATE_URL={h(origin)}\nWORKER_ENROLL_CODE={h(code)}\nDATA_DIR=./data</pre>\n'
             'Kode berlaku 10 menit untuk satu pemasangan. Setelah terhubung, pilih server ini pada detail pengguna.\n'
-            'Simpan kode secara pribadi.'),[[button('↻ Periksa Koneksi',f'srv:detail:{server}')],
+            'Pemasang mengambil runtime yang cocok secara otomatis. Simpan kode secara pribadi.'),
+                                        [[{'text':'⬇️ Unduh Pemasang Worker','url':'https://raw.githubusercontent.com/H3llnn/ZEI-Gate/main/install_worker.py'}],
+                                         [button('↻ Periksa Koneksi',f'srv:detail:{server}')],
                                          [button('‹ Kelola Server','srv:list:0')]])
 
     async def server_choices(self, user, target, page=0):
