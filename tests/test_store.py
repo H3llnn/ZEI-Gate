@@ -48,9 +48,9 @@ class StoreTests(unittest.TestCase):
             self.db.setting(99, 3, 'database', -100123)
         self.db.admin(99, 2, 3, True)
         self.assertTrue(self.db.can_upload(99, 3))
-        with self.assertRaises(PermissionError):
-            self.db.setting(99, 3, 'protection', True)
-        self.assertFalse(self.db.settings(99)['protection'])
+        self.db.setting(99, 3, 'protection', True)
+        self.assertTrue(self.db.settings(99)['protection'])
+        self.assertFalse(self.db.settings(100)['protection'])
         self.assertEqual(self.db.settings(99)['delete_seconds'], 1800)
         for i in range(4):
             self.db.target(99, 2, -1000-i, 'channel', 'https://t.me/test')
