@@ -145,7 +145,9 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
         self.migrations = Migrations(self.db,self.manager,self.root/'gate')
         self.servers.migrations = self.migrations
         self.migrations.installed(self.migrations.get(ident),receipt)
+        version = self.db.rows('SELECT version FROM server_prefixes WHERE owner=2')[0]['version']
         self.migrations.installed(self.migrations.get(ident),receipt)
+        self.assertEqual(self.db.rows('SELECT version FROM server_prefixes WHERE owner=2')[0]['version'],version)
         await self.complete(ident)
         self.assertEqual(self.migrations.get(ident)['phase'],'done')
 

@@ -430,6 +430,8 @@ class Migrations:
         counts = {t:len(r) for t,r in payload['tables'].items()}
         if receipt.get('counts') != counts:
             raise ValueError('Jumlah data receipt berbeda.')
+        if job['phase'] == 'verify':
+            return
         with self.db.conn:
             if job['spec']['account']:
                 from zei_userbot.state import validate_prefix
