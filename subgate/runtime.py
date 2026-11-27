@@ -22,6 +22,7 @@ class Manager:
         self.userbots = None
         self.creation = None
         self.servers = None
+        self.migrations = None
         self.call_allowed = lambda: True
 
     def remote_server(self, owner):
@@ -57,6 +58,8 @@ class Manager:
         if bot in self.running:
             return
         record = self.db.bot(bot)
+        if self.db.frozen(record['owner']):
+            return
         server = self.remote_server(record['owner'])
         if server is not None:
             if not self.servers.online(self.servers.get(server)):
@@ -77,6 +80,7 @@ class Manager:
         self.running[bot] = runner
 
     async def deploy(self, owner, api_id, api_hash, token, kind="forcesubs"):
+        self.db.mutable(owner)
         if not self.db.allowed(owner,kind):
             raise PermissionError('Kamu belum mendapat izin membuat bot.')
         me, session = await self.authenticate(api_id, api_hash, token)
@@ -140,7 +144,7 @@ class Manager:
         async with self.lock:
             if self.userbots: await self.userbots.reconcile()
             for record in self.db.bots():
-                if self.remote_server(record['owner']) is not None:
+                if self.remote_server(record['owner']) is not None or self.db.frozen(record['owner']):
                     continue
                 if record['active'] and self.db.allowed(record['owner'],record['kind']):
                     try:
@@ -155,7 +159,7 @@ class Manager:
             if tick % 6 == 0:
                 await self.restore()
             for record in self.db.bots():
-                if self.remote_server(record['owner']) is not None:
+                if self.remote_server(record['owner']) is not None or self.db.frozen(record['owner']):
                     continue
                 api = None
                 temporary = False

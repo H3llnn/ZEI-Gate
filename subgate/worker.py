@@ -1,5 +1,6 @@
 """Client-server process. Enroll once, then reconcile desired child bots over HTTPS."""
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -42,11 +43,16 @@ class Worker:
         self.deadline = 0
         self.lock = asyncio.Lock()
         self.manager.call_allowed = lambda: time.monotonic() < self.deadline
+        self.migration_acks = {}
         db.conn.execute('CREATE TABLE IF NOT EXISTS worker_versions (bot INTEGER PRIMARY KEY, revision TEXT NOT NULL)')
         db.conn.execute('CREATE TABLE IF NOT EXISTS worker_accounts (owner INTEGER PRIMARY KEY, revision TEXT NOT NULL, prefix_version INTEGER NOT NULL DEFAULT 0)')
         db.conn.commit()
         if self.manager.userbots is None:
             self.manager.userbots = Userbots(db, directory or Path(db.conn.execute('PRAGMA database_list').fetchone()[2]).parent/'userbots')
+        from .migration import MigrationNode
+        self.migration_node = MigrationNode(db,self.manager,Path(db.conn.execute('PRAGMA database_list').fetchone()[2]).parent)
+        db.conn.execute('CREATE TABLE IF NOT EXISTS migration_downloads (job TEXT NOT NULL, part INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(job,part))')
+        db.conn.commit()
         original = self.manager.runner_factory
 
         def factory(record, credentials):
@@ -79,6 +85,8 @@ class Worker:
         service.helper = snapshot.get('helper','')
         wanted = {item['owner']:item for item in snapshot.get('userbots',[])}
         for record in self.db.rows('SELECT * FROM userbots'):
+            if self.db.frozen(record['owner']):
+                continue
             if record['owner'] not in wanted:
                 with self.db.conn:
                     self.db.conn.execute('UPDATE userbots SET active=0 WHERE owner=?',(record['owner'],))
@@ -86,6 +94,8 @@ class Worker:
                 if runner:
                     await runner.stop()
         for owner,item in wanted.items():
+            if self.db.frozen(owner):
+                continue
             if type(owner) is not int or owner <= 0:
                 raise ValueError('Identitas Userbot tidak valid.')
             allowed = bool(item['allowed'])
@@ -128,12 +138,16 @@ class Worker:
             async with asyncio.timeout_at(deadline):
                 wanted = {item['id']: item for item in snapshot['bots']}
                 for record in self.db.bots():
+                    if self.db.frozen(record['owner']):
+                        continue
                     if record['id'] not in wanted:
                         self.db.set_active(self.db.master_owner, record['id'], False)
                         runner = self.manager.running.pop(record['id'], None)
                         if runner:
                             await runner.stop()
                 for item in wanted.values():
+                    if self.db.frozen(item['owner']):
+                        continue
                     if (type(item['id']) is not int or type(item['owner']) is not int
                             or item['id'] <= 0 or item['owner'] <= 0 or item['kind'] not in ('forcesubs', 'payment')):
                         raise ValueError('Bot pada snapshot tidak valid.')
@@ -175,6 +189,47 @@ class Worker:
                         except Exception as exc:
                             log.warning('Bot %s belum aktif: %s',item['id'],type(exc).__name__)
                 await self.apply_accounts(snapshot)
+
+    async def transfer(self, commands, request):
+        from .migration import CHUNK, checksum
+        self.migration_acks = {}
+        for command in commands:
+            ident, phase = command['id'], command['phase']
+            async def call(action, **values):
+                return await request({'id':ident,'action':action,**values})
+            try:
+                if phase == 'export':
+                    data = await self.migration_node.export(command)
+                    start = command['next_part']
+                    total = (len(data)+CHUNK-1)//CHUNK
+                    for part in range(start,min(start+8,total)):
+                        await call('put',part=part,data=base64.b64encode(data[part*CHUNK:(part+1)*CHUNK]).decode())
+                    if start+8 >= total:
+                        await call('exported',size=len(data),digest=checksum(data))
+                elif phase == 'import':
+                    rows = self.db.rows('SELECT part FROM migration_downloads WHERE job=? ORDER BY part', (ident,))
+                    start = len(rows)
+                    total = (command['size']+CHUNK-1)//CHUNK
+                    for part in range(start,min(start+8,total)):
+                        chunk = base64.b64decode((await call('get',part=part))['data'],validate=True)
+                        if not 0 < len(chunk) <= CHUNK:
+                            raise ValueError('Ukuran potongan tidak sesuai.')
+                        with self.db.conn:
+                            self.db.conn.execute('INSERT INTO migration_downloads VALUES (?,?,?)', (ident,part,self.db.cipher.encrypt(chunk)))
+                    if start+8 >= total:
+                        data = b''.join(self.db.cipher.decrypt(r['data']) for r in self.db.rows('SELECT data FROM migration_downloads WHERE job=? ORDER BY part', (ident,)))
+                        receipt = await self.migration_node.install(command,data)
+                        await call('installed',receipt=receipt)
+                elif phase == 'verify':
+                    self.migration_node.activate(command)
+                    self.migration_acks[ident] = 'active'
+                elif phase == 'cleanup':
+                    self.migration_node.finish(command,worker=True)
+                    await call('cleaned')
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await call('error_source' if phase in ('export','cleanup') else 'error_target')
 
     async def expire(self):
         async with self.lock, self.manager.lock:
@@ -232,7 +287,7 @@ async def main():
                                 async with http.post(origin+'/servers/enroll',json={'code': identity['code'],'token': identity['token']}) as response:
                                     identity['server'] = (await response.json())['server']
                         report = worker.report() if worker else {}
-                        async with http.post(origin+'/servers/sync',headers={'Authorization': 'Bearer '+identity['token']},json={'report':report}) as response:
+                        async with http.post(origin+'/servers/sync',headers={'Authorization': 'Bearer '+identity['token']},json={'report':report,'migration_version':1,'migration_acks':worker.migration_acks if worker else {}}) as response:
                             snapshot = await response.json()
                         if worker is None:
                             owner = snapshot['master_owner']
@@ -244,6 +299,11 @@ async def main():
                             watch = asyncio.create_task(worker.watch())
                         identity.pop('code',None)
                         save_identity(path,identity)
+                        worker.deadline = started + LEASE_SECONDS
+                        async def migration_request(body):
+                            async with http.post(origin+'/servers/migration',headers={'Authorization':'Bearer '+identity['token']},json=body) as response:
+                                return await response.json()
+                        await worker.transfer(snapshot.get('migrations',[]),migration_request)
                         await worker.apply(snapshot, started)
                     except asyncio.CancelledError:
                         raise

@@ -85,6 +85,7 @@ class Store:
             self.conn.execute('PRAGMA user_version=1')
         self.init_payment()
         self.conn.execute('''CREATE TABLE IF NOT EXISTS userbots (owner INTEGER PRIMARY KEY, name TEXT NOT NULL, credentials BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1, redeploy_required INTEGER NOT NULL DEFAULT 0)''')
+        self.conn.execute('CREATE TABLE IF NOT EXISTS migration_holds (owner INTEGER PRIMARY KEY, job TEXT NOT NULL, role TEXT NOT NULL)')
         self.conn.commit()
 
     def init_payment(self):
@@ -123,6 +124,22 @@ class Store:
         if actor != self.master_owner:
             raise PermissionError('Hanya pemilik bot induk yang boleh melakukan ini.')
 
+    def migrating(self, owner):
+        if not self.rows("SELECT name FROM sqlite_master WHERE name='migrations'"):
+            return False
+        return bool(self.rows("SELECT 1 FROM migrations WHERE owner=? AND phase != 'done'", (owner,)))
+
+    def frozen(self, owner):
+        if self.rows('SELECT 1 FROM migration_holds WHERE owner=?', (owner,)):
+            return True
+        if not self.rows("SELECT name FROM sqlite_master WHERE name='migrations'"):
+            return False
+        return bool(self.rows("SELECT 1 FROM migrations WHERE owner=? AND phase IN ('export','import')", (owner,)))
+
+    def mutable(self, owner):
+        if self.migrating(owner):
+            raise ValueError('Migrasi masih berjalan. Tunggu sampai selesai sebelum mengubah layanan.')
+
     def allowed(self, user, kind=None):
         if kind is not None and kind not in ('forcesubs','payment','userbot'):
             raise ValueError('Jenis bot tidak dikenal.')
@@ -138,6 +155,7 @@ class Store:
 
     def grant(self, actor, user, kind='forcesubs', *, preserve=False):
         self.master(actor)
+        self.mutable(user)
         selected = set(kind.split('+')) if isinstance(kind, str) else set()
         if kind == 'both': selected = {'forcesubs', 'payment'}
         if kind == 'all': selected = {'forcesubs', 'payment', 'userbot'}
@@ -162,6 +180,7 @@ class Store:
 
     def revoke(self, actor, user, kind='both'):
         self.master(actor)
+        self.mutable(user)
         if user == self.master_owner:
             raise ValueError('Tidak dapat mencabut izin pemilik bot induk.')
         if kind not in ('forcesubs','payment','userbot','both','all'):
@@ -201,6 +220,7 @@ class Store:
             raise PermissionError('Hanya pemilik dan admin bot yang boleh mengubah pengaturan.')
 
     def deploy(self, actor, bot, username, api_id, api_hash, token, session, name=None, kind='forcesubs'):
+        self.mutable(actor)
         if kind not in ('forcesubs','payment'): raise ValueError('Akun Userbot memakai proses pembuatan akun tersendiri.')
         if not self.allowed(actor, kind):
             raise PermissionError('Kamu belum mendapat izin membuat bot.')
@@ -225,6 +245,7 @@ class Store:
 
     def set_active(self, actor, bot, active):
         self.master(actor)
+        self.mutable(self.bot(bot)['owner'])
         if active and not self.allowed(self.bot(bot)['owner'], self.bot(bot)['kind']):
             raise PermissionError('Pemilik bot belum mendapat izin.')
         if active and self.bot(bot)['redeploy_required']:

@@ -83,10 +83,22 @@ async def main():
             from .payment_webhook import PaymentWebhook
             webhook=PaymentWebhook(db,manager,os.environ.get('PAYMENT_PUBLIC_BASE','') if os.environ.get('PAYMENT_ENABLE_WEBHOOK')=='1' else '',
                 os.environ.get('PAYMENT_BIND','127.0.0.1'),int(os.environ.get('PAYMENT_PORT','8080')))
+            receive_payment = webhook.receive
+            async def receive_when_writable(request):
+                from aiohttp import web
+                async with manager.lock:
+                    rows = db.rows('SELECT owner FROM payment_accounts WHERE route=?', (request.match_info['route'],))
+                    if rows and db.frozen(rows[0]['owner']):
+                        raise web.HTTPServiceUnavailable()
+                    return await receive_payment(request)
+            webhook.receive = receive_when_writable
             await webhook.start()
             from .userbots import Userbots
             manager.userbots = Userbots(db, config.data / 'userbots', me['username'])
             manager.userbots.servers = manager.servers
+            from .migration import Migrations
+            manager.migrations = Migrations(db, manager, config.data)
+            manager.servers.migrations = manager.migrations
             if os.environ.get('CREATION_ENABLE') == '1':
                 from .creation import Creation
                 creation = Creation(db,manager,config.token,os.environ.get('CREATION_PUBLIC_BASE',''),me['username'],
@@ -108,9 +120,11 @@ async def main():
             await poller.start()
             await manager.restore()
             manager.maintenance_task = asyncio.create_task(manager.maintenance())
+            manager.migrations.task = asyncio.create_task(manager.migrations.run())
             print(f"ZΞI Gate aktif: @{me['username']}", flush=True)
             await asyncio.Future()
         finally:
+            if manager and manager.migrations: await manager.migrations.close()
             if creation: await creation.close()
             if webhook: await webhook.close()
             if poller:

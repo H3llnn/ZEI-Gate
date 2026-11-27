@@ -186,6 +186,9 @@ class MasterUI(ServerUI, BaseUI):
                    [button('‹ Daftar Pengguna', 'm:users:0')], HOME]
         if service:
             buttons.insert(2,[button('🖥️ Server',f'srv:choose:{target}:0')])
+        migrations=getattr(self.manager,'migrations',None)
+        if migrations and migrations.latest(target):
+            buttons.insert(3,[button('🚚 Status Migrasi',f'srv:migration:{target}')])
         await self.text(user, panel('Detail akses pengguna 👤',
             f'<b>Nama:</b> {h(await self.user_name(target))}\n<b>Server bot:</b> {h(placement)}\n'
             f'<b>ID:</b> {target}\n<b>Akses:</b> {"🟢 Diizinkan" if allowed else "🔒 Dicabut"}\n'

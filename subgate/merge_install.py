@@ -56,7 +56,9 @@ def merge(force_folder, payment_folder, output):
         overlap={r['id'] for r in target.bots()} & {r['id'] for r in source.bots()}
         if any(target.bot(bot)['owner']!=source.bot(bot)['owner'] for bot in overlap):
             raise ValueError('Bot bertabrakan dengan pemilik berbeda; migrasi dibatalkan.')
-        known=set(TABLES)|{'creators','creator_permissions','sqlite_sequence'}
+        if any(db.rows('SELECT 1 FROM migration_holds LIMIT 1') for db in stores):
+            raise ValueError('Selesaikan migrasi server sebelum menggabungkan cadangan.')
+        known=set(TABLES)|{'creators','creator_permissions','sqlite_sequence','migration_holds'}
         unknown=[r['name'] for r in source.rows("SELECT name FROM sqlite_master WHERE type='table'") if r['name'] not in known]
         if unknown: raise ValueError('Ada tabel yang belum didukung migrasi; data tidak diubah.')
         legacy_admins={bot:target.admins(bot) for bot in overlap}
@@ -127,4 +129,3 @@ if __name__=='__main__':
         print(json.dumps(merge(args.forcesubs,args.payment,args.output)))
     except Exception:
         raise SystemExit('Migrasi belum selesai. Tujuan tidak diaktifkan; cadangan sumber tetap dipertahankan.') from None
-

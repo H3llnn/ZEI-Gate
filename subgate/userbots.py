@@ -41,6 +41,7 @@ class Userbots:
         finally: state.close()
 
     async def set_prefix(self, owner, prefix):
+        self.db.mutable(owner)
         if not self.db.allowed(owner,'userbot'):
             raise PermissionError('Izin Userbot sudah dicabut.')
         if self.remote(owner):
@@ -81,6 +82,7 @@ class Userbots:
             raise
 
     async def deploy(self, owner, credentials, identity):
+        self.db.mutable(owner)
         if not self.db.allowed(owner, "userbot") or identity.get("id") != owner:
             raise PermissionError("Izin atau identitas akun tidak sesuai.")
         if self.remote(owner):
@@ -128,14 +130,14 @@ class Userbots:
             row = self.record(owner)
             runner = self.running[owner]
             dead = hasattr(runner, "process") and runner.process.returncode is not None
-            if dead or self.remote(owner) or not row or not row["active"] or not self.db.allowed(owner, "userbot"):
+            if dead or self.remote(owner) or self.db.frozen(owner) or not row or not row["active"] or not self.db.allowed(owner, "userbot"):
                 await self.running.pop(owner).stop()
                 if self.notifier and not self.db.allowed(owner,"userbot"):
                     try: await self.notifier(owner)
                     except Exception: pass
         for row in self.db.rows("SELECT * FROM userbots WHERE active=1 AND redeploy_required=0"):
             owner = row["owner"]
-            if not self.remote(owner) and owner not in self.running and self.db.allowed(owner, "userbot"):
+            if not self.remote(owner) and not self.db.frozen(owner) and owner not in self.running and self.db.allowed(owner, "userbot"):
                 try:
                     credentials = json.loads(self.db.cipher.decrypt(row["credentials"]))
                     self.running[owner] = await self.factory(owner, credentials)

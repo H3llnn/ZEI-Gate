@@ -25,6 +25,13 @@ class Servers:
             CREATE TABLE IF NOT EXISTS server_prefixes (
                 owner INTEGER PRIMARY KEY, prefix TEXT NOT NULL, version INTEGER NOT NULL);
         ''')
+        columns = {r['name'] for r in db.rows('PRAGMA table_info(servers)')}
+        for name, definition in {'migration_version':'INTEGER NOT NULL DEFAULT 0',
+                                 'migration_acks':"TEXT NOT NULL DEFAULT '{}'"}.items():
+            if name not in columns:
+                db.conn.execute('ALTER TABLE servers ADD COLUMN '+name+' '+definition)
+        db.conn.commit()
+        self.migrations = None
         self.helper = ''
 
     def all(self):
@@ -87,6 +94,7 @@ class Servers:
 
     def place(self, actor, owner, server):
         self.db.master(actor)
+        self.db.mutable(owner)
         if type(owner) is not int or owner <= 0:
             raise ValueError('Pengguna tidak valid.')
         if self.assigned(owner) == server:
@@ -109,7 +117,7 @@ class Servers:
     def revision(self, record):
         return hashlib.sha256(record['credentials']).hexdigest()
 
-    def heartbeat(self, token, report):
+    def heartbeat(self, token, report, migration_version=0, migration_acks=None):
         row = self.authenticate(token)
         desired = []
         for record in self.db.bots():
@@ -152,10 +160,14 @@ class Servers:
                 valid['u:'+str(owner)] = dict(revision=item['revision'],running=actual.get('running') is True,
                                              prefix=prefix,prefix_version=version)
         with self.db.conn:
-            self.db.conn.execute("UPDATE servers SET last_seen=?,report=?,code_hash=NULL WHERE id=?",
-                                 (time.time(), json.dumps(valid), row['id']))
+            acks = {}
+            commands = self.migrations.commands(row['id']) if self.migrations else []
+            if isinstance(migration_acks, dict):
+                acks = {c['id']:'active' for c in commands if c['phase']=='verify' and migration_acks.get(c['id'])=='active'}
+            self.db.conn.execute("UPDATE servers SET last_seen=?,report=?,code_hash=NULL,migration_version=?,migration_acks=? WHERE id=?",
+                                 (time.time(), json.dumps(valid), 1 if type(migration_version) is int and migration_version==1 else 0, json.dumps(acks), row['id']))
         return {'master_owner': self.db.master_owner, 'lease_seconds': LEASE_SECONDS, 'bots': desired,
-                'userbots': accounts, 'helper': self.helper}
+                'userbots': accounts, 'helper': self.helper, 'migrations': commands}
 
     def account_report(self, owner):
         server = self.assigned(owner)

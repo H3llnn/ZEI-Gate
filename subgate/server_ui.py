@@ -3,6 +3,24 @@ from .copy import button, h, panel, nav
 
 
 class ServerUI:
+    async def migration_status(self, user, target):
+        self.servers_service(user)
+        service = getattr(self.manager,'migrations',None)
+        job = service.latest(target) if service else None
+        if not job:
+            raise ValueError('Pengguna belum memiliki proses migrasi.')
+        labels = {'export':'Menyimpan dan mengirim data sumber', 'import':'Memeriksa dan memasang data tujuan',
+                  'verify':'Menunggu layanan aktif di tujuan', 'cleanup':'Merapikan salinan sumber', 'done':'Migrasi selesai ✅'}
+        name = lambda server: self.manager.servers.get(server)['name'] if server else 'Server Utama'
+        body = (f'<b>Pengguna:</b> {h(await self.user_name(target))}\n'
+                f'<b>Dari:</b> {h(name(job["source"]))}\n<b>Ke:</b> {h(name(job["target"]))}\n'
+                f'<b>Status:</b> {h(labels[job["phase"]])}\n\n'
+                'Pengaturan, link, transaksi, serta sesi dan catatan Userbot ikut dipindahkan. Cadangan privat tetap disimpan.')
+        if job['error']:
+            body += '\n\n🔧 Proses menunggu perbaikan koneksi atau data server dan akan mencoba lagi otomatis. Data sumber tetap dicadangkan.'
+        await self.text(user,panel('Migrasi layanan 🚚',body),
+            [[button('↻ Perbarui Status',f'srv:migration:{target}')], [button('‹ Detail Pengguna',f'm:user:{target}')]])
+
     async def grant_server_choices(self, user, target, page=0):
         service = self.servers_service(user)
         state = self.state(user)
@@ -100,11 +118,24 @@ class ServerUI:
         buttons.append([button('‹ Detail Pengguna',f'm:user:{target}')])
         await self.text(user,panel('Pilih Server 🖥️',f'<b>Pengguna:</b> {h(await self.user_name(target))}\n\n'
             'ForceSubs, Payment, dan Userbot baru akan dijalankan pada server pilihanmu.\n'
-            'Pengguna yang sudah memiliki bot atau Userbot perlu migrasi data sebelum pindah server.'),buttons)
+            'Jika sudah ada layanan, pemindahan akan memakai migrasi data dengan cadangan dan pemeriksaan otomatis.'),buttons)
 
     async def server_callback(self, user, data):
         service = self.servers_service(user)
         parts = data.split(':')
+        if parts[1]=='migration':
+            return await self.migration_status(user,int(parts[2]))
+        if parts[1]=='migrate':
+            target,server=int(parts[2]),int(parts[3]) or None
+            state=self.state(user)
+            if not state or state['kind']!='migration_confirm' or state['target']!=target or state['server']!=server:
+                raise ValueError('Konfirmasi berakhir. Pilih server kembali.')
+            async with self.manager.lock:
+                if service.assigned(target)!=state['source']:
+                    raise ValueError('Penempatan berubah. Pilih server kembali.')
+                self.manager.migrations.begin(user,target,server)
+            self.clear(user)
+            return await self.migration_status(user,target)
         if parts[1]=='grant_page':
             return await self.grant_server_choices(user,int(parts[2]),int(parts[3]))
         if parts[1]=='grant':
@@ -135,6 +166,20 @@ class ServerUI:
             return await self.server_choices(user,int(parts[2]),int(parts[3]))
         if parts[1]=='place':
             target,server=int(parts[2]),int(parts[3]) or None
+            migrations=getattr(self.manager,'migrations',None)
+            job=migrations.latest(target) if migrations else None
+            if job and job['phase']!='done':
+                return await self.migration_status(user,target)
+            if service.assigned(target)!=server and (self.db.bots(target) or self.db.rows('SELECT owner FROM userbots WHERE owner=?',(target,))):
+                if not migrations:
+                    raise ValueError('Perbarui Gate untuk mengaktifkan migrasi.')
+                source=service.assigned(target)
+                name=lambda value:service.get(value)['name'] if value else 'Server Utama'
+                self.wait(user,'migration_confirm',target=target,server=server,source=source,back=f'srv:choose:{target}:0')
+                return await self.text(user,panel('Pindahkan layanan? 🚚',
+                    f'<b>Pengguna:</b> {h(await self.user_name(target))}\n<b>Dari:</b> {h(name(source))}\n<b>Ke:</b> {h(name(server))}\n'
+                    f'<b>Bot:</b> {len(self.db.bots(target))}\n\nLayanan berhenti sementara saat data disalin. Tujuan diperiksa sebelum diaktifkan. Cadangan tetap disimpan.'),
+                    [[button('🚚 Mulai Migrasi',f'srv:migrate:{target}:{server or 0}')],[button('✕ Batal',f'm:user:{target}')]])
             async with self.manager.lock:
                 service.place(user,target,server)
             return await self.user_detail(user,target)
