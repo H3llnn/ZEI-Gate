@@ -3,6 +3,29 @@ from .copy import button, h, panel, nav
 
 
 class ServerUI:
+    async def grant_server_choices(self, user, target, page=0):
+        service = self.servers_service(user)
+        state = self.state(user)
+        if not state or state['kind'] != 'grant_server' or state['target'] != target:
+            raise ValueError('Pilihan server berakhir. Tambahkan pengguna kembali.')
+        rows = service.all()
+        page = max(0,min(page,max(0,(len(rows)-1)//8)))
+        buttons = [[button('🖥️ Server Utama',f'srv:grant:{target}:0')]]
+        for row in rows[page*8:(page+1)*8]:
+            if service.online(row):
+                buttons.append([button('🟢 '+row['name'],f'srv:grant:{target}:{row["id"]}')])
+        pages = []
+        if page:
+            pages.append(button('‹ Sebelumnya',f'srv:grant_page:{target}:{page-1}'))
+        if (page+1)*8 < len(rows):
+            pages.append(button('Berikutnya ›',f'srv:grant_page:{target}:{page+1}'))
+        if pages:
+            buttons.append(pages)
+        buttons.append([button('✕ Batal','x:cancel')])
+        return await self.text(user,panel('Tempatkan pengguna 🖥️',
+            f'<b>Pengguna:</b> {h(await self.user_name(target))}\n<b>Layanan:</b> {h(state["bot_kind"])}\n\n'
+            'Pilih server untuk menjalankan layanan pengguna ini. Izin diberikan setelah server dipilih.'),buttons)
+
     def servers_service(self, user):
         self.db.master(user)
         service = getattr(self.manager, 'servers', None)
@@ -82,6 +105,19 @@ class ServerUI:
     async def server_callback(self, user, data):
         service = self.servers_service(user)
         parts = data.split(':')
+        if parts[1]=='grant_page':
+            return await self.grant_server_choices(user,int(parts[2]),int(parts[3]))
+        if parts[1]=='grant':
+            target,server=int(parts[2]),int(parts[3]) or None
+            state=self.state(user)
+            if not state or state['kind']!='grant_server' or state['target']!=target:
+                raise ValueError('Pilihan server berakhir. Tambahkan pengguna kembali.')
+            async with self.manager.lock:
+                with self.db.conn:
+                    service.place(user,target,server)
+                    self.db.grant(user,target,state['bot_kind'],preserve=True)
+            self.clear(user)
+            return await self.user_detail(user,target)
         if parts[1]=='list':
             return await self.servers_menu(user,int(parts[2]))
         if parts[1]=='add':
