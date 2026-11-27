@@ -314,6 +314,11 @@ class MasterUI(ServerUI, BaseUI):
             state=self.state(user)
             if not state or state['kind']!='grant_kind' or state['target']!=int(parts[2]): raise ValueError('Konfirmasi izin berakhir.')
             if parts[3] not in ('userbot','payment','forcesubs'): raise ValueError('Pilih satu layanan dari menu izin terbaru.')
+            service = getattr(self.manager, 'servers', None)
+            target = int(parts[2])
+            if service and not self.db.bots(target) and not self.db.rows('SELECT owner FROM userbots WHERE owner=?',(target,)):
+                self.wait(user,'grant_server',target=target,bot_kind=parts[3],back='m:users:0')
+                return await self.grant_server_choices(user,target)
             await self.manager.grant(user,int(parts[2]),parts[3],preserve=True)
             self.clear(user)
             return await self.text(user,panel('Izin diberikan ✅','Jenis izin: '+h(parts[3])),[HOME])
