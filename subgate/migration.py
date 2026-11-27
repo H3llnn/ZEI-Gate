@@ -300,6 +300,8 @@ class MigrationNode:
             raise ValueError('Tujuan belum memiliki receipt migrasi.')
         with self.db.conn:
             self.db.conn.execute('DELETE FROM migration_holds WHERE owner=? AND job=?', (owner, command['id']))
+            if self.db.rows("SELECT name FROM sqlite_master WHERE name='migration_downloads'"):
+                self.db.conn.execute('DELETE FROM migration_downloads WHERE job=?', (command['id'],))
             for bot in command['spec']['bots']:
                 self.db.conn.execute('UPDATE bots SET active=?,redeploy_required=? WHERE id=?', (bot['active'], bot['redeploy_required'], bot['id']))
             account = command['spec']['account']
@@ -311,6 +313,7 @@ class MigrationNode:
             self.purge(command['owner'], registry=worker)
             # Retired owners remain held on the old worker, including scheduled cleanup.
             self.db.conn.execute("UPDATE migration_holds SET role='retired' WHERE owner=? AND job=?", (command['owner'], command['id']))
+            self.db.conn.execute('DELETE FROM migration_cache WHERE job=?', (command['id'],))
 
 
 class Migrations:
@@ -476,8 +479,6 @@ class Migrations:
                     elif job['phase'] == 'cleanup' and job['source'] == 0:
                         self.node.finish(job,worker=False)
                         self.cleaned(job)
-                    with self.db.conn:
-                        self.db.conn.execute("UPDATE migrations SET error='' WHERE id=?", (job['id'],))
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
